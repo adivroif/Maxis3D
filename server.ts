@@ -267,6 +267,27 @@ async function startServer() {
     }
   });
 
+  // NEW: API Route for categories by tenant name
+  app.get("/api/categories/:tenantName", async (req, res) => {
+    const { tenantName } = req.params;
+    const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/categories/tenantName/${encodeURIComponent(tenantName)}`;
+
+    try {
+      console.log(`Fetching categories from Azure API: ${azureApiUrl}`);
+      const response = await fetchWithTimeout(azureApiUrl, {}, 15000);
+      
+      if (!response.ok) {
+        throw new Error(`Azure API responded with status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      res.json(data);
+    } catch (err: any) {
+      console.error("Azure Categories API Error:", err);
+      res.status(500).json({ error: "Failed to fetch categories from Azure", details: err.message });
+    }
+  });
+
   // NEW: API Route for get-files from Azure Web Service
   app.get("/api/files/get-files", async (req, res) => {
     const { folder, clientName, fileName } = req.query;
