@@ -219,7 +219,12 @@ async function startServer() {
         if (!text || text.trim() === "") return null;
         
         try {
-          return JSON.parse(text);
+          const parsed = JSON.parse(text);
+          // If it's an array, make sure it has at least one item
+          if (Array.isArray(parsed)) {
+            return parsed.length > 0 ? parsed[0] : null;
+          }
+          return parsed;
         } catch (jsonErr) {
           console.error(`Failed to parse JSON for product ${title}:`, jsonErr);
           return null;
@@ -231,33 +236,35 @@ async function startServer() {
     };
 
     try {
-      // 1. Try exact name
-      let data = await tryFetch(modelName);
+      // Create variations to try
+      const variations = [
+        modelName,
+        modelName.replace(/_/g, ' '),         // My_Model -> My Model
+        modelName.replace(/-/g, ' '),         // My-Model -> My Model
+        modelName.charAt(0).toUpperCase() + modelName.slice(1), // camel -> Camel
+        modelName.toLowerCase(),
+        modelName.toUpperCase()
+      ];
+
+      // Remove duplicates and try each
+      const uniqueVariations = Array.from(new Set(variations));
       
-      // 2. Try capitalized name (e.g. connector -> Connector)
-      if (!data) {
-        const capitalized = modelName.charAt(0).toUpperCase() + modelName.slice(1);
-        if (capitalized !== modelName) {
-          data = await tryFetch(capitalized);
+      let data = null;
+      for (const variant of uniqueVariations) {
+        data = await tryFetch(variant);
+        if (data) {
+          console.log(`Matched product using variation: ${variant}`);
+          break;
         }
       }
-
-      // 3. Fallback to "Connector"
-      if (!data) {
+      
+      // Final fallback to "Connector" only if absolutely necessary and not already tried
+      if (!data && !uniqueVariations.includes("Connector")) {
         data = await tryFetch("Connector");
       }
 
       if (data) {
-        // Handle if API returns an array instead of a single object
-        const result = Array.isArray(data) ? data[0] : data;
-        
-        if (result) {
-          console.log(`Successfully fetched details for ${modelName}:`, {
-            productTitle: result.productTitle || result.title,
-            hasDescription: !!(result.productDescription || result.description)
-          });
-          return res.json(result);
-        }
+        return res.json(data);
       }
 
       res.status(404).json({ error: "Product not found" });
