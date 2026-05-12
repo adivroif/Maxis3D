@@ -13,10 +13,11 @@ interface SidebarProps {
   onRemove: (id: string) => void;
   onAddFromUrl: (url: string, name: string) => void;
   language: Language;
+  isMobile?: boolean;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
-  models, selectedId, onSelect, onAddFile, onRemove, onAddFromUrl, language
+  models, selectedId, onSelect, onAddFile, onRemove, onAddFromUrl, language, isMobile = false
 }) => {
   const [r2Files, setR2Files] = React.useState<any[]>([]);
   const [r2Textures, setR2Textures] = React.useState<any[]>([]);
@@ -101,7 +102,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               
               setDisplayStatus(prev => ({ ...prev, [normalizedName]: display }));
             } else {
-              // If product found but result is empty, don't display
+              // Product found but empty - hide by default
               setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
             }
           }
@@ -110,10 +111,11 @@ const Sidebar: React.FC<SidebarProps> = ({
           setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
         }
       } else if (res.status === 404) {
-        // Product not found in DB
+        // Product not found in DB - Hide by default
+        console.log(`Product ${productName} not found in DB, hiding.`);
         setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
       } else {
-        // Other error (e.g. 500)
+        // Error case - Hide by default
         setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
       }
     } catch (err) {
@@ -310,6 +312,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     return r2Files.filter(file => {
       const displayName = file.name.replace(/\.fbx$/i, '');
       const normalizedName = displayName.trim().toLowerCase();
+      // Strictly show only those set to true
       return displayStatus[normalizedName] === true;
     });
   }, [r2Files, displayStatus]);
@@ -423,9 +426,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                 ) : (
                   visibleFiles.map((file) => {
                     const originalDisplayName = file.name.replace(/\.fbx$/i, '');
+                    const cleanFileName = originalDisplayName.replace(/_/g, ' ').replace(/-/g, ' ');
                     const normalizedName = originalDisplayName.trim().toLowerCase();
                     const translation = translatedModels[normalizedName];
-                    const displayName = translation?.name || apiTitles[normalizedName] || originalDisplayName;
+                    const displayName = translation?.name || apiTitles[normalizedName] || cleanFileName;
                     
                     const thumbnail = r2Textures.find(t => {
                       const lowTex = t.name.toLowerCase();
@@ -440,6 +444,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <div 
                         key={file.key}
                         onMouseEnter={(e) => {
+                          if (isMobile) return;
                           const rect = e.currentTarget.getBoundingClientRect();
                           setHoveredProduct({
                             name: displayName,
@@ -528,9 +533,10 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
                         {files.map((file) => {
                           const originalDisplayName = file.name.replace(/\.fbx$/i, '');
+                          const cleanFileName = originalDisplayName.replace(/_/g, ' ').replace(/-/g, ' ');
                           const normalizedName = originalDisplayName.trim().toLowerCase();
                           const translation = translatedModels[normalizedName];
-                          const displayName = translation?.name || apiTitles[normalizedName] || originalDisplayName;
+                          const displayName = translation?.name || apiTitles[normalizedName] || cleanFileName;
 
                           // Prioritize textures that match the model name and contain "preview"
                           const thumbnail = r2Textures.find(t => {
@@ -546,6 +552,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <div 
                               key={file.key}
                               onMouseEnter={(e) => {
+                                if (isMobile) return;
                                 const rect = e.currentTarget.getBoundingClientRect();
                                 setHoveredProduct({
                                   name: displayName,

@@ -165,6 +165,11 @@ const App: React.FC = () => {
                       originalDescription: desc,
                       linkTo: result.linkTo
                     });
+                    
+                    // Auto-open on large screens only
+                    if (window.innerWidth >= 1024) {
+                      setIsProductInfoOpen(true);
+                    }
                   }
                 }
               } catch (parseErr) {
@@ -217,7 +222,9 @@ const App: React.FC = () => {
       return;
     }
     const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
-    const displayTitle = productDetails?.originalTitle || selectedModel.name;
+    const originalDisplayName = selectedModel.name;
+    const cleanFileName = originalDisplayName.replace(/_/g, ' ').replace(/-/g, ' ');
+    const displayTitle = productDetails?.originalTitle || cleanFileName;
     if (langName === 'English') {
       setTranslatedSelectedModelName(displayTitle);
       return;
@@ -466,7 +473,6 @@ const App: React.FC = () => {
           settings: createDefaultSettings(), detectedMaterials: [], detectedMeshes: [], position: [0, 0, 0]
         }]);
         setSelectedId(id);
-        if (!isMobile) setIsProductInfoOpen(true);
         setTargetView({ pos: defaultCamPos.clone(), lookAt: new THREE.Vector3(0, 0, 0) });
         setIsSidebarOpen(false);
       }
@@ -485,7 +491,6 @@ const App: React.FC = () => {
       settings: createDefaultSettings(), detectedMaterials: [], detectedMeshes: [], position: [0, 0, 0]
     }]);
     setSelectedId(id);
-    if (!isMobile) setIsProductInfoOpen(true);
     setTargetView({ pos: defaultCamPos.clone(), lookAt: new THREE.Vector3(0, 0, 0) });
     setIsSidebarOpen(false);
   };
@@ -528,7 +533,7 @@ const App: React.FC = () => {
           return { 
             textures: items.map((item: any) => ({
               name: item.fileName || item.FileName || item.Name || item.name || "Unknown",
-              url: `/api/files/get-file?folder=images&clientName=tenantA&fileName=${encodeURIComponent(item.fileName || item.FileName || item.Name || item.name || "")}`
+              url: item.url || item.Url || item.Link || item.link || ""
             }))
           };
         }).catch(() => ({ textures: [] })),
@@ -1011,7 +1016,7 @@ const App: React.FC = () => {
       <div 
         className={`fixed inset-0 pointer-events-none z-[-1] flex items-center justify-center transition-all duration-1000 ${isNightMode ? 'opacity-[0.6] brightness-[300%]' : 'opacity-[0.08]'}`}
         style={{
-          backgroundImage: 'url(/api/files/get-file?folder=images&clientName=tenantA&fileName=wallpaper_customer.png)',
+          backgroundImage: 'url(/api/files/get-file?folder=images&fileName=wallpaper_customer.png)',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
           backgroundSize: '70%',
@@ -1027,7 +1032,7 @@ const App: React.FC = () => {
           className="w-12 h-12 sm:w-16 sm:h-16 bg-white/80 backdrop-blur-xl rounded-xl sm:rounded-2xl border border-black/5 shadow-2xl overflow-hidden flex items-center justify-center pointer-events-auto transition-transform hover:scale-105 active:scale-95"
         >
           <img 
-            src="/api/files/get-file?folder=images&clientName=tenantA&fileName=wallpaper_customer.png" 
+            src="/api/files/get-file?folder=images&fileName=wallpaper_customer.png" 
             alt="Customer Logo" 
             className="w-full h-full object-contain p-2"
             referrerPolicy="no-referrer"
@@ -1240,15 +1245,16 @@ const App: React.FC = () => {
 
         {/* PRODUCT INFO TAB - LEFT SIDE */}
         {selectedModel && (
-          <div className="absolute left-0 top-[60%] -translate-y-1/2 z-[100] flex items-center pointer-events-none">
+          <div className="absolute left-0 top-[60%] -translate-y-1/2 z-[110] flex items-center pointer-events-none">
             <button
               onClick={() => setIsProductInfoOpen(!isProductInfoOpen)}
-              className={`group relative flex items-center justify-center w-8 h-20 sm:w-12 sm:h-28 bg-white/95 backdrop-blur-xl border border-black/10 shadow-2xl transition-all duration-500 pointer-events-auto ${
+              className={`group relative flex items-center justify-center w-8 h-20 sm:w-12 sm:h-28 bg-white/95 backdrop-blur-xl border border-black/10 shadow-2xl transition-all duration-500 pointer-events-auto opacity-100 visible ${
                 isProductInfoOpen ? 'translate-x-[280px] sm:translate-x-[320px]' : 'translate-x-0'
               }`}
               style={{
                 clipPath: 'polygon(0% 0%, 100% 50%, 0% 100%)',
-                borderRadius: '0 12px 12px 0'
+                borderRadius: '0 12px 12px 0',
+                zIndex: 111
               }}
             >
               <div className={`transition-transform duration-500 ${isProductInfoOpen ? 'rotate-180' : ''}`}>
@@ -1518,6 +1524,7 @@ const App: React.FC = () => {
             onAddFromUrl={handleAddFromUrl}
             onRemove={handleRemoveModel} 
             language={language}
+            isMobile={isMobile}
           />
         </div>
       </div>
