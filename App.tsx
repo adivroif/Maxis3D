@@ -235,6 +235,7 @@ const App: React.FC = () => {
     };
     translateName();
   }, [language, selectedModel?.name, productDetails?.originalTitle]);
+
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
   const [environmentUrl, setEnvironmentUrl] = useState<string | null>(null);
   const [modelParts, setModelParts] = useState<ModelPart[]>([]);
@@ -242,6 +243,28 @@ const App: React.FC = () => {
   const [hoveredPartId, setHoveredPartId] = useState<string | null>(null);
   const [translatedParts, setTranslatedParts] = useState<Record<string, { name: string, description: string }>>({});
   const [activePart, setActivePart] = useState<{ id: string, name: string, description: string, position?: THREE.Vector3, size?: THREE.Vector3, mesh?: THREE.Mesh } | null>(null);
+
+  // Translate detected meshes when no modelParts are available
+  useEffect(() => {
+    const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
+    if (langName === 'English' || modelParts.length > 0 || !selectedModel?.detectedMeshes?.length) {
+      return;
+    }
+
+    const translateMeshes = async () => {
+      try {
+        const results = await translateBatch(selectedModel.detectedMeshes, langName);
+        const newTranslatedParts: Record<string, { name: string, description: string }> = {};
+        selectedModel.detectedMeshes.forEach((mesh, idx) => {
+          newTranslatedParts[mesh] = { name: results[idx], description: '' };
+        });
+        setTranslatedParts(prev => ({ ...prev, ...newTranslatedParts }));
+      } catch (err) {
+        console.error("Mesh translation failed:", err);
+      }
+    };
+    translateMeshes();
+  }, [language, selectedModel?.detectedMeshes, modelParts.length]);
   const controlsRef = useRef<any>(null);
   const selectedModelForFetch = models.find(m => m.id === selectedId);
   const modelNameForFetch = selectedModelForFetch?.name;
@@ -1304,7 +1327,7 @@ const App: React.FC = () => {
                       isNightMode 
                         ? 'text-white group-hover/title:text-yellow-400' 
                         : 'text-zinc-800 group-hover/title:text-yellow-600'
-                    }`}>{productDetails?.title || selectedModel.name}</h2>
+                    }`}>{productDetails?.title || translatedSelectedModelName || selectedModel.name}</h2>
                   </div>
                   <button 
                     onClick={() => setIsProductInfoOpen(false)}
@@ -1427,6 +1450,8 @@ const App: React.FC = () => {
                               })
                             ) : (
                               selectedModel.detectedMeshes.map((meshName) => {
+                                const tr = translatedParts[meshName];
+                                const displayName = tr?.name || meshName;
                                 const isActive = activePart?.name === meshName;
                                 const isHovered = hoveredPartId === meshName;
 
@@ -1449,7 +1474,7 @@ const App: React.FC = () => {
                                           {t.labelPartName}:
                                         </span>
                                         <span className={`text-[11px] font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-white' : 'text-zinc-900'}`}>
-                                          {meshName}
+                                          {displayName}
                                         </span>
                                       </div>
                                     </div>

@@ -636,9 +636,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           className="fixed z-[9999] pointer-events-none transition-all duration-300 animate-in fade-in zoom-in-95"
           style={{
             top: Math.min(hoveredProduct.rect.top, window.innerHeight - 400),
-            left: isRTL 
-              ? hoveredProduct.rect.left + hoveredProduct.rect.width + 10
-              : hoveredProduct.rect.left - 310, 
+            left: hoveredProduct.rect.left - 310, 
             width: '300px',
           }}
         >
