@@ -306,7 +306,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
 
     translateModelInfo();
-  }, [language, r2Files, descriptions]);
+  }, [language, r2Files, descriptions, apiTitles]);
 
   const visibleFiles = React.useMemo(() => {
     return r2Files.filter(file => {

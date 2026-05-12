@@ -8,9 +8,24 @@ import { fileURLToPath } from "url";
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { pipeline } from "stream/promises";
+import { GoogleGenAI } from "@google/genai";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Initialize Gemini
+let aiInstance: GoogleGenAI | null = null;
+const getAI = () => {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.warn("⚠️ Warning: GEMINI_API_KEY is missing. Translations will not work.");
+      return null;
+    }
+    aiInstance = new GoogleGenAI({ apiKey });
+  }
+  return aiInstance;
+};
 
 // Initialize R2 Client (S3 compatible)
 const getR2Client = () => {
@@ -516,6 +531,87 @@ async function startServer() {
     } catch (err: any) {
       console.error("Azure File Proxy Error:", err);
       res.status(500).send(`Failed to proxy file from Azure: ${err.message}`);
+    }
+  });
+
+  // API Route for translation
+  app.post("/api/ai/translate", async (req, res) => {
+    const { texts, targetLanguage } = req.body;
+    if (!texts || !Array.isArray(texts)) return res.status(400).json({ error: "texts array is required" });
+    if (!targetLanguage) return res.status(400).json({ error: "targetLanguage is required" });
+
+    const ai = getAI();
+    if (!ai) return res.status(500).json({ error: "Gemini API not configured" });
+
+    try {
+      const prompt = `Translate the following list of strings to ${targetLanguage}. 
+Return ONLY a valid JSON array of strings in the exact same order.
+If you cannot translate a string, return the original.
+
+List:
+${JSON.stringify(texts)}`;
+
+      const model = await ai.models.get("gemini-3-flash-preview");
+      const result = await model.generateContent(prompt);
+      const responseText = result.response.text().trim();
+      
+      let translatedArray: string[] = [];
+      const jsonMatch = responseText.match(/\[.*\]/s);
+      if (jsonMatch) {
+         try {
+           translatedArray = JSON.parse(jsonMatch[0]);
+         } catch (e) {
+           console.error("Failed to parse JSON from AI:", responseText);
+           translatedArray = texts;
+         }
+      } else {
+        translatedArray = responseText.split('\n').filter(l => l.trim().length > 0);
+      }
+
+      res.json({ translated: translatedArray });
+    } catch (err: any) {
+      console.error("Translation API Error:", err);
+      res.status(500).json({ error: "Translation failed", detail: err.message });
+    }
+  });
+
+  // API Route for TTS
+  app.post("/api/ai/tts", async (req, res) => {
+    const { text, langCode } = req.body;
+    if (!text) return res.status(400).json({ error: "text is required" });
+
+    const ai = getAI();
+    if (!ai) return res.status(500).json({ error: "Gemini API not configured" });
+
+    try {
+      const hint = langCode === 'he' ? `Speak this Hebrew text clearly: ${text}` : 
+                 langCode === 'ar' ? `Speak this Arabic text clearly: ${text}` : text;
+
+      const model = await ai.models.get("gemini-3.1-flash-tts-preview");
+      const result = await model.generateContent({
+        contents: [{ parts: [{ text: hint }] }],
+        config: {
+          //@ts-ignore
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: 'Kore' },
+            },
+          },
+        },
+      });
+
+      const part = result.response.candidates?.[0]?.content?.parts?.[0];
+      const audioBase64 = part?.inlineData?.data;
+
+      if (audioBase64) {
+        res.json({ audio: audioBase64 });
+      } else {
+        res.status(500).json({ error: "No audio generated" });
+      }
+    } catch (err: any) {
+      console.error("TTS API Error:", err);
+      res.status(500).json({ error: "TTS failed", detail: err.message });
     }
   });
 

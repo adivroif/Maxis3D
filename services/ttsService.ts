@@ -1,19 +1,4 @@
 
-import { GoogleGenAI, Modality } from "@google/genai";
-
-let aiInstance: GoogleGenAI | null = null;
-
-function getAI() {
-  if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("GEMINI_API_KEY is missing. Translation and TTS will not work.");
-      return null;
-    }
-    aiInstance = new GoogleGenAI({ apiKey });
-  }
-  return aiInstance;
-}
 
 let audioContext: AudioContext;
 let isQuotaExceeded = false;
@@ -111,39 +96,30 @@ const speakNative = (text: string, langCode: string) => {
 };
 
 /**
- * Generates an AudioBuffer from text using Gemini TTS.
+ * Generates an AudioBuffer from text using Gemini TTS via server proxy.
  */
 export const generateAudioBuffer = async (text: string, langCode: string = 'en'): Promise<AudioBuffer | null> => {
   if (isQuotaExceeded) return null;
 
   try {
-    const ctx = getAudioContext();
-    // Add language hint to the prompt for better TTS quality
-    const prompt = langCode === 'he' ? `Speak this Hebrew text clearly: ${text}` : 
-                   langCode === 'ar' ? `Speak this Arabic text clearly: ${text}` : text;
-
-    const ai = getAI();
-    if (!ai) return null;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-tts-preview",
-      contents: [{ parts: [{ text: prompt }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
-          },
-        },
-      },
+    const response = await fetch('/api/ai/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, langCode })
     });
 
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!response.ok) throw new Error("TTS proxy failed");
+    
+    const data = await response.json();
+    const base64Audio = data.audio;
+    
     if (base64Audio) {
+      const ctx = getAudioContext();
       const audioData = decodeBase64(base64Audio);
       return await decodeAudioData(audioData, ctx, 24000, 1);
     }
   } catch (error: any) {
+    console.error("TTS failed:", error);
     if (error?.message?.includes('429') || error?.message?.includes('quota')) {
       isQuotaExceeded = true;
     }
@@ -210,8 +186,7 @@ const isAlreadyInLanguage = (text: string, langCode: string): boolean => {
 };
 
 /**
- * Translates a batch of strings in a single Gemini request.
- * This is much more efficient and helps avoid quota limits.
+ * Translates a batch of strings in a single request via server proxy.
  */
 export const translateBatch = async (texts: string[], targetLanguage: string): Promise<string[]> => {
   if (texts.length === 0) return [];
@@ -222,6 +197,7 @@ export const translateBatch = async (texts: string[], targetLanguage: string): P
   // Filter out texts already in the target language or already cached
   const toTranslate: string[] = [];
   const results: string[] = new Array(texts.length).fill('');
+  const toTranslateIndices: number[] = [];
   
   texts.forEach((text, i) => {
     const cacheKey = `${targetLanguage}:${text}`;
@@ -231,61 +207,45 @@ export const translateBatch = async (texts: string[], targetLanguage: string): P
       results[i] = text;
     } else {
       toTranslate.push(text);
+      toTranslateIndices.push(i);
     }
   });
 
   if (toTranslate.length === 0) return results;
 
   try {
-    const ai = getAI();
-    if (!ai) return texts;
-
-    // We use a structured prompt to get back a JSON array or clear list
-    const prompt = `Translate the following list of strings to ${targetLanguage}. 
-Return ONLY a valid JSON array of strings in the exact same order.
-If you cannot translate a string, return the original.
-
-List:
-${JSON.stringify(toTranslate)}`;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: [{ parts: [{ text: prompt }] }],
+    const response = await fetch('/api/ai/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ texts: toTranslate, targetLanguage })
     });
+
+    if (!response.ok) throw new Error("Translation proxy failed");
     
-    const responseText = response.text?.trim() || "";
-    let translatedArray: string[] = [];
+    const { translated: translatedArray } = await response.json();
     
-    try {
-      // Try to parse as JSON first
-      const jsonMatch = responseText.match(/\[.*\]/s);
-      if (jsonMatch) {
-        translatedArray = JSON.parse(jsonMatch[0]);
-      } else {
-        // Fallback: split by lines if it's not JSON
-        translatedArray = responseText.split('\n').map(l => cleanTranslatedText(l));
-      }
-    } catch (e) {
-      console.warn("Batch translation parse failed, falling back to individual translation", e);
-      // If batch fails, we don't want to fail everything
-      return texts;
-    }
+    if (!Array.isArray(translatedArray)) throw new Error("Invalid response from translation proxy");
 
     // Map back to original indices
-    let translateIdx = 0;
-    return texts.map((text, i) => {
-      if (results[i]) return results[i];
-      const translated = cleanTranslatedText(translatedArray[translateIdx++] || text);
-      const cacheKey = `${targetLanguage}:${text}`;
-      translationCache[cacheKey] = translated;
-      return translated;
+    translatedArray.forEach((translated, idx) => {
+      const originalIdx = toTranslateIndices[idx];
+      const originalText = toTranslate[idx];
+      const cleaned = cleanTranslatedText(translated || originalText);
+      results[originalIdx] = cleaned;
+      
+      const cacheKey = `${targetLanguage}:${originalText}`;
+      translationCache[cacheKey] = cleaned;
     });
+
+    return results;
   } catch (error: any) {
     console.error("Batch translation failed:", error);
     if (error?.message?.includes('429')) {
       isQuotaExceeded = true;
     }
-    return texts;
+    // Return original on failure
+    texts.forEach((t, i) => { if (!results[i]) results[i] = t; });
+    return results;
   }
 };
 
