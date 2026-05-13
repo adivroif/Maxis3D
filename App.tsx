@@ -1039,7 +1039,7 @@ const App: React.FC = () => {
       <div 
         className={`fixed inset-0 pointer-events-none z-[-1] flex items-center justify-center transition-all duration-1000 ${isNightMode ? 'opacity-[0.6] brightness-[300%]' : 'opacity-[0.08]'}`}
         style={{
-          backgroundImage: 'url(/api/files/get-file?folder=images&fileName=wallpaper_customer.png)',
+          backgroundImage: 'url(/api/files/get-file?folder=images&fileName=wallpaper_customer_maxis.png)',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
           backgroundSize: '70%',
@@ -1055,7 +1055,7 @@ const App: React.FC = () => {
           className="w-12 h-12 sm:w-16 sm:h-16 bg-white/80 backdrop-blur-xl rounded-xl sm:rounded-2xl border border-black/5 shadow-2xl overflow-hidden flex items-center justify-center pointer-events-auto transition-transform hover:scale-105 active:scale-95"
         >
           <img 
-            src="/api/files/get-file?folder=images&fileName=wallpaper_customer.png" 
+            src="/api/files/get-file?folder=images&fileName=wallpaper_customer_maxis.png" 
             alt="Customer Logo" 
             className="w-full h-full object-contain p-2"
             referrerPolicy="no-referrer"
@@ -1139,12 +1139,17 @@ const App: React.FC = () => {
         <Canvas 
           shadows 
           dpr={[1, 2]} 
-          gl={{ antialias: true, alpha: true }} 
+          gl={{ 
+            antialias: true, 
+            alpha: true,
+            sortObjects: true,
+            logarithmicDepthBuffer: true
+          }} 
           className="relative z-20"
           style={{ background: 'transparent' }}
           onPointerDown={() => { if (isMoveMode) setIsMoveMode(false); setTargetView(null); setActivePart(null); stopSpeaking(); }}
         >
-          <PerspectiveCamera makeDefault position={isMobile ? [0, 40, 180] : [0, 30, 120]} fov={35} />
+          <PerspectiveCamera makeDefault position={isMobile ? [0, 40, 180] : [0, 30, 120]} fov={35} near={0.1} far={2000} />
           <CameraHandler targetView={targetView} controlsRef={controlsRef} activePartMesh={activePart?.mesh} />
           <Suspense fallback={<Html center><div className="text-yellow-500 font-black uppercase tracking-[0.5em] animate-pulse text-[10px]">{t.initializing}</div></Html>}>
             {isUploading && (
