@@ -8,23 +8,40 @@ import { fileURLToPath } from "url";
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { pipeline } from "stream/promises";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { v2 } from '@google-cloud/translate';
+
+const { Translate } = v2;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Gemini
-let aiInstance: GoogleGenAI | null = null;
+let aiInstance: GoogleGenerativeAI | null = null;
 const getAI = () => {
   if (!aiInstance) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      console.warn("⚠️ Warning: GEMINI_API_KEY is missing. Translations will not work.");
+      console.warn("⚠️ Warning: GEMINI_API_KEY is missing. TTS will not work.");
       return null;
     }
-    aiInstance = new GoogleGenAI({ apiKey });
+    aiInstance = new GoogleGenerativeAI(apiKey);
   }
   return aiInstance;
+};
+
+// Initialize Google Cloud Translate
+let translateClient: v2.Translate | null = null;
+const getTranslate = () => {
+  if (!translateClient) {
+    const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
+    if (!apiKey) {
+      console.warn("⚠️ Warning: GOOGLE_TRANSLATE_API_KEY is missing. Translations will use fallback.");
+      return null;
+    }
+    translateClient = new Translate({ key: apiKey });
+  }
+  return translateClient;
 };
 
 // Initialize R2 Client (S3 compatible)
@@ -60,9 +77,13 @@ const validateR2Config = () => {
 };
 
 // Utility for fetching with a timeout
-async function fetchWithTimeout(url: string, options: any = {}, timeout = 10000) {
+async function fetchWithTimeout(url: string, options: any = {}, timeout = 30000) {
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
+  const id = setTimeout(() => {
+    console.warn(`Fetch to ${url} timed out after ${timeout}ms - Aborting`);
+    controller.abort();
+  }, timeout);
+  
   try {
     const response = await fetch(url, {
       ...options,
@@ -70,8 +91,11 @@ async function fetchWithTimeout(url: string, options: any = {}, timeout = 10000)
     });
     clearTimeout(id);
     return response;
-  } catch (error) {
+  } catch (error: any) {
     clearTimeout(id);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeout}ms`);
+    }
     throw error;
   }
 }
@@ -134,7 +158,7 @@ async function startServer() {
 
     try {
       console.log(`Fetching model parts from Azure API: ${azureApiUrl}`);
-      const response = await fetchWithTimeout(azureApiUrl, {}, 15000);
+      const response = await fetchWithTimeout(azureApiUrl, {}, 45000);
       
       if (!response.ok) {
         throw new Error(`Azure API responded with status: ${response.status}`);
@@ -184,7 +208,7 @@ async function startServer() {
 
     try {
       console.log(`Fetching inventory from Azure API: ${azureApiUrl}`);
-      const response = await fetchWithTimeout(azureApiUrl, {}, 15000);
+      const response = await fetchWithTimeout(azureApiUrl, {}, 45000);
       
       if (!response.ok) {
         throw new Error(`Azure API responded with status: ${response.status}`);
@@ -227,7 +251,7 @@ async function startServer() {
     const tryFetch = async (title: string) => {
       try {
         const url = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/Products/productTitle/${encodeURIComponent(title)}`;
-        const resp = await fetchWithTimeout(url, {}, 15000);
+        const resp = await fetchWithTimeout(url, {}, 45000);
         if (!resp.ok) return null;
         
         const text = await resp.text();
@@ -296,8 +320,20 @@ async function startServer() {
 
     try {
       console.log(`Fetching categories from Azure API: ${azureApiUrl}`);
-      const response = await fetchWithTimeout(azureApiUrl, {}, 15000);
+      let response;
+      try {
+        response = await fetchWithTimeout(azureApiUrl, {}, 45000);
+      } catch (err) {
+        console.warn(`Initial categories fetch threw error, retrying...`, err);
+        response = await fetchWithTimeout(azureApiUrl, {}, 60000);
+      }
       
+      // Also retry if not ok but didn't throw
+      if (!response.ok) {
+        console.warn(`Initial categories fetch returned not-ok status, retrying...`);
+        response = await fetchWithTimeout(azureApiUrl, {}, 60000);
+      }
+
       if (!response.ok) {
         throw new Error(`Azure API responded with status: ${response.status}`);
       }
@@ -351,8 +387,20 @@ async function startServer() {
 
     try {
       console.log(`Fetching files from Azure API: ${azureApiUrl}`);
-      const response = await fetchWithTimeout(azureApiUrl, {}, 15000);
+      let response;
+      try {
+        response = await fetchWithTimeout(azureApiUrl, {}, 45000);
+      } catch (err) {
+        console.warn(`Initial files fetch threw error, retrying...`, err);
+        response = await fetchWithTimeout(azureApiUrl, {}, 60000);
+      }
       
+      // Also retry if not ok but didn't throw
+      if (!response.ok) {
+        console.warn(`Initial files fetch returned not-ok status, retrying...`);
+        response = await fetchWithTimeout(azureApiUrl, {}, 60000);
+      }
+
       if (!response.ok) {
         throw new Error(`Azure API responded with status: ${response.status}`);
       }
@@ -413,7 +461,7 @@ async function startServer() {
 
     try {
       console.log(`Fetching image list from Azure for model filtering: ${azureApiUrl}`);
-      const response = await fetchWithTimeout(azureApiUrl, {}, 15000);
+      const response = await fetchWithTimeout(azureApiUrl, {}, 45000);
       
       if (!response.ok) {
         throw new Error(`Azure API responded with status: ${response.status}`);
@@ -493,7 +541,7 @@ async function startServer() {
 
     try {
       console.log(`Proxying Azure file: ${azureFileUrl}`);
-      const response = await fetchWithTimeout(azureFileUrl, {}, 30000);
+      const response = await fetchWithTimeout(azureFileUrl, {}, 60000);
       
       if (!response.ok) {
         return res.status(response.status).send(`Azure responded with ${response.status}`);
@@ -540,39 +588,133 @@ async function startServer() {
     if (!texts || !Array.isArray(texts)) return res.status(400).json({ error: "texts array is required" });
     if (!targetLanguage) return res.status(400).json({ error: "targetLanguage is required" });
 
+    const translate = getTranslate();
     const ai = getAI();
-    if (!ai) return res.status(500).json({ error: "Gemini API not configured" });
+    
+    // Map common language names to ISO codes if necessary
+    let langCode = targetLanguage;
+    const langMap: { [key: string]: string } = {
+      'hebrew': 'he',
+      'he': 'he',
+      'iw': 'he', // Old code for Hebrew
+      'english': 'en',
+      'en': 'en',
+      'russian': 'ru',
+      'ru': 'ru',
+      'french': 'fr',
+      'fr': 'fr',
+      'spanish': 'es',
+      'es': 'es',
+      'arabic': 'ar',
+      'ar': 'ar',
+      'deutsch': 'de',
+      'german': 'de',
+      'de': 'de',
+      'it': 'it',
+      'italian': 'it'
+    };
+    
+    const lowerLang = targetLanguage.toString().toLowerCase().trim();
+    if (langMap[lowerLang]) {
+      langCode = langMap[lowerLang];
+    } else if (lowerLang.length > 2 && !lowerLang.includes('-')) {
+      // If it's a long name not in map, default to something or try to use it as-is (might fail)
+      console.warn(`Unknown language name: ${targetLanguage}, using as-is.`);
+    } else if (lowerLang.includes('-')) {
+      // Handle codes like he-IL -> he
+      langCode = lowerLang.split('-')[0];
+    }
 
-    try {
-      const prompt = `Translate the following list of strings to ${targetLanguage}. 
+    // Filter out invalid items to prevent API errors
+    const validTexts = texts.map(t => {
+      if (t === null || t === undefined) return "";
+      return String(t).trim();
+    }).filter(t => t.length > 0);
+    
+    if (validTexts.length === 0) {
+      console.log("No valid texts to translate, returning originals.");
+      return res.json({ translated: texts });
+    }
+
+    // Attempt Cloud Translation first
+    if (translate) {
+      try {
+        console.log(`Translating ${validTexts.length} items to codes='${langCode}' (from original '${targetLanguage}') using Google Cloud Translate (batched)...`);
+        
+        const BATCH_SIZE = 50;
+        const translatedResults: string[] = [];
+        
+        for (let i = 0; i < validTexts.length; i += BATCH_SIZE) {
+          const batch = validTexts.slice(i, i + BATCH_SIZE);
+          console.log(`Processing translation batch ${Math.floor(i/BATCH_SIZE) + 1} (${batch.length} items)...`);
+          const [translations] = await translate.translate(batch, langCode);
+          const results = Array.isArray(translations) ? translations : [translations];
+          translatedResults.push(...results);
+        }
+        
+        // Map back to original array (including the empty/invalid ones we skipped)
+        let validIdx = 0;
+        const finalResults = texts.map(t => {
+          if (t !== null && t !== undefined && String(t).trim().length > 0) {
+            return translatedResults[validIdx++] || String(t);
+          }
+          return t;
+        });
+        
+        return res.json({ translated: finalResults });
+      } catch (err: any) {
+        console.error("Cloud Translation API Error details:", err);
+        // If it's a 400 error (Invalid Value), it's likely the language code
+        if (err.code === 400 || err.message?.includes('Invalid Value')) {
+          console.warn(`Invalid language code '${langCode}' for Cloud Translate. Trying fallback...`);
+        }
+      }
+    }
+
+    // Fallback to Gemini if Translate is missing or fails
+    if (ai) {
+      try {
+        console.log(`Falling back to Gemini for translation to ${targetLanguage}...`);
+        const prompt = `Translate the following list of strings to ${targetLanguage}. 
 Return ONLY a valid JSON array of strings in the exact same order.
 If you cannot translate a string, return the original.
 
 List:
 ${JSON.stringify(texts)}`;
 
-      const model = await ai.models.get("gemini-3-flash-preview");
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.text().trim();
-      
-      let translatedArray: string[] = [];
-      const jsonMatch = responseText.match(/\[.*\]/s);
-      if (jsonMatch) {
-         try {
-           translatedArray = JSON.parse(jsonMatch[0]);
-         } catch (e) {
-           console.error("Failed to parse JSON from AI:", responseText);
-           translatedArray = texts;
-         }
-      } else {
-        translatedArray = responseText.split('\n').filter(l => l.trim().length > 0);
+        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const result = await model.generateContent(prompt);
+        const responseText = result.response.text().trim();
+        
+        let translatedArray: string[] = [];
+        const jsonMatch = responseText.match(/\[.*\]/s);
+        if (jsonMatch) {
+           try {
+             translatedArray = JSON.parse(jsonMatch[0]);
+           } catch (e) {
+             console.error("Gemini returned invalid JSON for translation.");
+             translatedArray = texts;
+           }
+        } else {
+          translatedArray = responseText.split('\n').filter(l => l.trim().length > 0);
+        }
+        
+        if (translatedArray.length === texts.length) {
+          return res.json({ translated: translatedArray });
+        } else {
+          console.warn(`Gemini returned ${translatedArray.length} items but expected ${texts.length}.`);
+        }
+      } catch (geminiErr: any) {
+        console.error("Gemini fallback translation failed:", geminiErr.message || geminiErr);
+        if (geminiErr.message?.includes('API key not valid')) {
+          console.warn("Gemini API Key is invalid. Check your environment settings.");
+        }
       }
-
-      res.json({ translated: translatedArray });
-    } catch (err: any) {
-      console.error("Translation API Error:", err);
-      res.status(500).json({ error: "Translation failed", detail: err.message });
     }
+
+    // Ultimate fallback: return originals
+    console.warn("All translation methods failed or were unavailable. Returning original texts.");
+    res.json({ translated: texts });
   });
 
   // API Route for TTS
@@ -587,10 +729,10 @@ ${JSON.stringify(texts)}`;
       const hint = langCode === 'he' ? `Speak this Hebrew text clearly: ${text}` : 
                  langCode === 'ar' ? `Speak this Arabic text clearly: ${text}` : text;
 
-      const model = await ai.models.get("gemini-3.1-flash-tts-preview");
+      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
       const result = await model.generateContent({
-        contents: [{ parts: [{ text: hint }] }],
-        config: {
+        contents: [{ role: "user", parts: [{ text: hint }] }],
+        generationConfig: {
           //@ts-ignore
           responseModalities: ["AUDIO"],
           speechConfig: {
