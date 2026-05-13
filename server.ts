@@ -20,7 +20,7 @@ const __dirname = path.dirname(__filename);
 let aiInstance: GoogleGenerativeAI | null = null;
 const getAI = () => {
   if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
     if (!apiKey) {
       console.warn("⚠️ Warning: GEMINI_API_KEY is missing. TTS will not work.");
       return null;
