@@ -1055,7 +1055,7 @@ const App: React.FC = () => {
           className="w-12 h-12 sm:w-16 sm:h-16 bg-white/80 backdrop-blur-xl rounded-xl sm:rounded-2xl border border-black/5 shadow-2xl overflow-hidden flex items-center justify-center pointer-events-auto transition-transform hover:scale-105 active:scale-95"
         >
           <img 
-            src="/api/files/get-file?folder=images&fileName=wallpaper_customer_maxis.png" 
+            src="/api/files/get-file?folder=images&fileName=wallpaper_customer_maxis_only_logo.png" 
             alt="Customer Logo" 
             className="w-full h-full object-contain p-2"
             referrerPolicy="no-referrer"
