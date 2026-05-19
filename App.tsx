@@ -47,6 +47,8 @@ const CameraHandler: React.FC<{
 
 const App: React.FC = () => {
   const [models, setModels] = useState<SceneModelInstance[]>([]);
+  const [catalogFiles, setCatalogFiles] = useState<any[]>([]);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isMoveMode, setIsMoveMode] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -124,6 +126,41 @@ const App: React.FC = () => {
       fetchTextureSets();
     });
   }, [models]);
+
+  useEffect(() => {
+    const fetchCatalog = async () => {
+      setIsLoadingCatalog(true);
+      try {
+        const response = await fetch('/api/files/get-files?folder=tenants&clientName=tenantA');
+        if (response.ok) {
+          const rawData = await response.json();
+          const getListData = (raw: any) => {
+            if (Array.isArray(raw)) return raw;
+            if (raw && typeof raw === 'object') {
+              return raw.files || raw.items || raw.data || Object.values(raw).find(v => Array.isArray(v)) || [];
+            }
+            return [];
+          };
+          const modelsData = getListData(rawData);
+          const files = modelsData
+            .map((item: any) => {
+              if (typeof item === 'string') return { key: item, name: item, url: item };
+              const name = item.fileName || item.FileName || item.filename || item.Name || item.name || "";
+              const key = item.fullPath || item.FullPath || item.fullpath || item.Key || item.item_key || item.key || name || "";
+              const url = `/api/files/get-file?folder=tenants&clientName=tenantA&fileName=${encodeURIComponent(name)}`;
+              return { key, name, url };
+            })
+            .filter((f: any) => f.name.toLowerCase().endsWith(".fbx") || f.key.toLowerCase().endsWith(".fbx"));
+          setCatalogFiles(files);
+        }
+      } catch (err) {
+        console.error("Failed to fetch catalog in App:", err);
+      } finally {
+        setIsLoadingCatalog(false);
+      }
+    };
+    fetchCatalog();
+  }, []);
 
   useEffect(() => {
     if (models.length > 0 && !selectedId) {
@@ -274,7 +311,11 @@ const App: React.FC = () => {
     setModelParts([]);
     setTranslatedParts({});
     
-    if (!selectedId || !modelNameForFetch) {
+    // We prefer fetching parts based on the specific model filename first, 
+    // as it's often more unique than the readable title.
+    const searchName = modelNameForFetch || productDetails?.originalTitle;
+
+    if (!selectedId || !searchName) {
       return;
     }
 
@@ -282,14 +323,14 @@ const App: React.FC = () => {
     const fetchModelParts = async () => {
       setIsFetchingParts(true);
       try {
-        const response = await fetch(`/api/model-parts?modelName=${encodeURIComponent(modelNameForFetch)}`);
+        const response = await fetch(`/api/model-parts?modelName=${encodeURIComponent(searchName)}`);
         if (!response.ok) {
           console.warn(`Server responded with ${response.status} for model parts`);
           setIsFetchingParts(false);
           return;
         }
         const text = await response.text();
-        if (text && text.trim().startsWith('[')) { // Check if it looks like JSON array
+        if (text && (text.trim().startsWith('[') || text.trim().startsWith('{'))) { 
           try {
             const data = JSON.parse(text);
             const parts = Array.isArray(data) ? data : (data.parts || []);
@@ -342,7 +383,7 @@ const App: React.FC = () => {
     };
 
     fetchModelParts();
-  }, [selectedId, modelNameForFetch]);
+  }, [selectedId, modelNameForFetch, productDetails?.originalTitle]);
 
   useEffect(() => {
     const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
@@ -414,6 +455,7 @@ const App: React.FC = () => {
       // Toggle logic: if clicking the same part, close it
       if (activePart?.id === part.id) {
         setActivePart(null);
+        if (selectedId) updateModelSettings(selectedId, { targetPartId: undefined });
         setTargetView({ pos: defaultCamPos, lookAt: new THREE.Vector3(0, 0, 0) });
         return;
       }
@@ -471,6 +513,7 @@ const App: React.FC = () => {
       }
     } else {
       setActivePart(null);
+      if (selectedId) updateModelSettings(selectedId, { targetPartId: undefined });
       // Reset view to default if part is deselected
       setTargetView({ pos: defaultCamPos, lookAt: new THREE.Vector3(0, 0, 0) });
     }
@@ -1361,7 +1404,7 @@ const App: React.FC = () => {
                     </div>
 
                     {/* Parts Section */}
-                    {(isFetchingParts || (modelParts && modelParts.length > 0) || (selectedModel.detectedMeshes && selectedModel.detectedMeshes.length > 0)) && (
+                    {(isFetchingParts || (modelParts && modelParts.length > 0)) && (
                       <div className="space-y-4">
                         <div className="flex items-center gap-2 mb-2">
                           <div className={`w-1 h-3 bg-yellow-500 rounded-full ${isRTL ? 'ml-0' : ''}`}></div>
@@ -1382,115 +1425,111 @@ const App: React.FC = () => {
                           </div>
                         ) : (
                           <div className="grid gap-2">
-                            {modelParts.length > 0 ? (
-                              modelParts.map((part) => {
+                            {modelParts
+                              .filter(part => part.presentAtSite !== false)
+                              .map((part) => {
                                 const tr = translatedParts[part.id];
                                 const name = tr?.name || part.partName;
                                 const description = tr?.description || part.description;
                                 const isActive = activePart?.id === part.id;
-                                const isHovered = hoveredPartId === part.id;
+                                
+                                // HIGHLIGHTING: Use partName or partKey for mesh matching 
+                                const meshMatchTarget = part.partName || part.partKey || part.id;
+                                const isHovered = hoveredPartId === meshMatchTarget;
+                                
+                                // Find the matching model file
+                                const partNameForMatch = part.partName.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
+                                const partKeyForMatch = (part.partKey || '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
+                                const match = catalogFiles.find(file => {
+                                  const fileName = file.name.replace(/\.fbx$/i, '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
+                                  return fileName === partNameForMatch || fileName === partKeyForMatch;
+                                });
 
                                 return (
                                   <button
                                     key={part.id}
-                                    onMouseEnter={() => setHoveredPartId(part.id)}
+                                    onMouseEnter={() => setHoveredPartId(meshMatchTarget)}
                                     onMouseLeave={() => setHoveredPartId(null)}
                                     onClick={() => {
-                                      updateModelSettings(selectedId!, { targetPartId: part.id });
-                                      if (part.linkTo && part.linkTo.trim() !== '') {
-                                        window.open(part.linkTo, '_blank', 'noopener,noreferrer');
+                                      if (activePart?.id === part.id) {
+                                        handlePartClick(null);
+                                        return;
+                                      }
+                                      
+                                      // Try to find a matching mesh in the detected parts for better positioning
+                                      const detectedMatch = parts.find(dp => 
+                                        dp.name.toLowerCase().includes(part.partName.toLowerCase()) || 
+                                        part.partName.toLowerCase().includes(dp.name.toLowerCase()) ||
+                                        (part.partKey && dp.name.toLowerCase().includes(part.partKey.toLowerCase()))
+                                      );
+
+                                      const p = {
+                                        id: part.id,
+                                        name: translatedParts[part.id]?.name || part.partName,
+                                        description: translatedParts[part.id]?.description || part.description,
+                                        position: detectedMatch?.position || new THREE.Vector3(),
+                                        size: detectedMatch?.size || new THREE.Vector3(),
+                                        mesh: detectedMatch?.mesh as any
+                                      };
+                                      handlePartClick(p);
+                                      if (match) {
+                                        handleAddFromUrl(match.url, match.name);
                                       }
                                     }}
                                     className={`flex flex-col p-4 rounded-2xl border transition-all text-start relative group cursor-pointer ${
                                       isActive 
-                                        ? 'bg-yellow-500 border-yellow-600 text-white shadow-lg' 
+                                        ? 'bg-yellow-50 border-yellow-500 border-2 shadow-lg shadow-yellow-900/10 text-yellow-950' 
                                         : isHovered
-                                          ? isNightMode ? 'bg-zinc-700/80 border-white/40 text-white shadow-sm transform scale-[1.01]' : 'bg-zinc-100 border-zinc-200 text-zinc-800 shadow-sm transform scale-[1.01]'
+                                          ? isNightMode ? 'bg-yellow-900/30 border-yellow-500/50 text-white shadow-sm transform scale-[1.01]' : 'bg-yellow-50 border-yellow-300 text-yellow-900 shadow-sm transform scale-[1.01]'
                                           : isNightMode ? 'bg-zinc-800/80 border-white/20 text-zinc-400 hover:border-white/40' : 'bg-white border-black/5 text-zinc-600 hover:border-yellow-500/30'
                                     }`}
                                   >
                                     <div className="space-y-2">
                                       <div className="flex items-start justify-between gap-2">
                                         <div className="flex items-start gap-2">
-                                          <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-20 shrink-0 opacity-60 ${isActive ? 'text-white' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                          <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-20 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
                                             {t.labelPartKey}:
                                           </span>
-                                          <span className={`text-[10px] font-black uppercase tracking-tight ${isActive ? 'text-white' : isNightMode ? 'text-zinc-300' : 'text-zinc-700'}`}>
+                                          <span className={`text-[10px] font-black uppercase tracking-tight ${isActive ? 'text-yellow-900' : isNightMode ? 'text-zinc-300' : 'text-zinc-700'}`}>
                                             {part.partKey || part.id.substring(0, 8)}
                                           </span>
                                         </div>
-                                        {part.linkTo && part.linkTo.trim() !== '' && (
-                                          <div className={`${isActive ? 'text-white/80' : 'text-yellow-500'} group-hover:scale-110 transition-transform ${isRTL ? 'rotate-180' : ''}`}>
-                                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                        {match && (
+                                          <div className={`p-1.5 rounded-full ${isActive ? 'bg-yellow-500/20' : 'bg-yellow-500/10'} group-hover:scale-110 transition-transform ${isRTL ? 'rotate-180' : ''}`}>
+                                            <svg className={`w-3.5 h-3.5 ${isActive ? 'text-yellow-600' : 'text-yellow-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                             </svg>
                                           </div>
                                         )}
                                       </div>
                                       
                                       <div className="flex items-start gap-2">
-                                        <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-20 shrink-0 opacity-60 ${isActive ? 'text-white' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                        <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-20 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
                                           {t.labelPartName}:
                                         </span>
-                                        <span className={`text-[11px] font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-white' : isNightMode ? 'text-white' : 'text-zinc-900'}`}>
+                                        <span className={`text-[11px] font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-zinc-900' : isNightMode ? 'text-white' : 'text-zinc-900'}`}>
                                           {name}
                                         </span>
                                       </div>
 
                                       <div className="flex flex-col gap-0.5">
-                                        <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} opacity-60 ${isActive ? 'text-white' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                        <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
                                           {t.labelPartDescription}:
                                         </span>
-                                        <p className={`text-[11px] leading-snug line-clamp-3 ${isActive ? 'text-white/90' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}>
+                                        <p className={`text-[11px] leading-snug line-clamp-3 ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}>
                                           {description}
                                         </p>
                                       </div>
                                     </div>
                                     
                                     {isActive && (
-                                      <div className="absolute top-4 right-4 w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                                      <div className="absolute top-4 right-4 w-1.5 h-1.5 bg-yellow-600 rounded-full animate-pulse" />
                                     )}
                                   </button>
                                 );
                               })
-                            ) : (
-                              selectedModel.detectedMeshes.map((meshName) => {
-                                const tr = translatedParts[meshName];
-                                const displayName = tr?.name || meshName;
-                                const isActive = activePart?.name === meshName;
-                                const isHovered = hoveredPartId === meshName;
-
-                                return (
-                                  <button
-                                    key={meshName}
-                                    onMouseEnter={() => setHoveredPartId(meshName)}
-                                    onMouseLeave={() => setHoveredPartId(null)}
-                                    className={`flex flex-col p-4 rounded-2xl border transition-all text-start relative group ${
-                                      isActive 
-                                        ? 'bg-yellow-500 border-yellow-600 text-white shadow-lg' 
-                                        : isHovered
-                                          ? 'bg-zinc-100 border-zinc-200 text-zinc-800 shadow-sm transform scale-[1.01]'
-                                          : 'bg-white border-black/5 text-zinc-600 hover:border-yellow-500/30'
-                                    }`}
-                                  >
-                                    <div className="space-y-2">
-                                      <div className="flex items-start gap-2">
-                                        <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-20 shrink-0 opacity-60 ${isActive ? 'text-white' : 'text-zinc-500'}`}>
-                                          {t.labelPartName}:
-                                        </span>
-                                        <span className={`text-[11px] font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-white' : 'text-zinc-900'}`}>
-                                          {displayName}
-                                        </span>
-                                      </div>
-                                    </div>
-                                    
-                                    {isActive && (
-                                      <div className="absolute top-4 right-4 w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-                                    )}
-                                  </button>
-                                );
-                              })
-                            )}
+                            }
                           </div>
                         )}
                       </div>
@@ -1512,6 +1551,7 @@ const App: React.FC = () => {
               </div>
               <button 
                 onClick={() => { 
+                  if (selectedId) updateModelSettings(selectedId, { targetPartId: undefined });
                   setActivePart(null); 
                   stopSpeaking(); 
                   setTargetView({ pos: defaultCamPos, lookAt: new THREE.Vector3(0, 0, 0) });
@@ -1555,6 +1595,8 @@ const App: React.FC = () => {
             onRemove={handleRemoveModel} 
             language={language}
             isMobile={isMobile}
+            catalogFiles={catalogFiles}
+            isLoadingCatalog={isLoadingCatalog}
           />
         </div>
       </div>

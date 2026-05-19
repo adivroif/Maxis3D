@@ -30,20 +30,30 @@ function decodeBase64(base64: string) {
 async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
 ): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+  // Create a copy because decodeAudioData transfers/detaches the buffer
+  const bufferCopy = data.buffer.slice(0);
+  
+  try {
+    // browser's native decodeAudioData is much more robust for various formats
+    return await ctx.decodeAudioData(data.buffer);
+  } catch (e) {
+    console.warn("Native decode failed, attempting raw PCM fallback", e);
+    // Fallback to manual PCM decoding if native fails
+    const numChannels = 1;
+    const sampleRate = 24000;
+    const dataInt16 = new Int16Array(bufferCopy);
+    const frameCount = dataInt16.length / numChannels;
+    const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
 
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    for (let channel = 0; channel < numChannels; channel++) {
+      const channelData = buffer.getChannelData(channel);
+      for (let i = 0; i < frameCount; i++) {
+        channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+      }
     }
+    return buffer;
   }
-  return buffer;
 }
 
 /**
@@ -66,29 +76,35 @@ const speakNative = (text: string, langCode: string) => {
   const targetLang = langMap[langCode] || 'en-US';
   utterance.lang = targetLang;
 
+  const voices = window.speechSynthesis.getVoices();
   const setVoice = () => {
-    const voices = window.speechSynthesis.getVoices();
     if (voices.length > 0) {
-      // Priority 1: Exact match for targetLang (e.g., 'he-IL')
-      // Priority 2: Match for langCode (e.g., 'he')
       const voice = voices.find(v => v.lang === targetLang) || 
                     voices.find(v => v.lang.startsWith(langCode));
       
       if (voice) {
         utterance.voice = voice;
-      } else if (langCode === 'he' || langCode === 'ar') {
-        // If we're in Hebrew/Arabic and NO matching voice is found,
-        // it's better to NOT speak than to speak in a "German" accent.
-        console.warn(`No native voice found for ${langCode}, skipping native fallback.`);
-        return false;
+        return true;
       }
     }
-    return true;
+    return false;
   };
 
-  if (!setVoice()) return;
+  // If voices aren't loaded yet, wait for them
+  if (voices.length === 0) {
+    window.speechSynthesis.onvoiceschanged = () => {
+      const updatedVoices = window.speechSynthesis.getVoices();
+      const voice = updatedVoices.find(v => v.lang === targetLang) || 
+                    updatedVoices.find(v => v.lang.startsWith(langCode));
+      if (voice) utterance.voice = voice;
+      window.speechSynthesis.speak(utterance);
+    };
+    return;
+  }
 
-  utterance.rate = 0.85; // Slightly slower for better clarity
+  setVoice();
+
+  utterance.rate = 0.9; 
   utterance.pitch = 1.0;
   
   console.log(`Speaking (${targetLang}): ${text}`);
@@ -116,7 +132,7 @@ export const generateAudioBuffer = async (text: string, langCode: string = 'en')
     if (base64Audio) {
       const ctx = getAudioContext();
       const audioData = decodeBase64(base64Audio);
-      return await decodeAudioData(audioData, ctx, 24000, 1);
+      return await decodeAudioData(audioData, ctx);
     }
   } catch (error: any) {
     console.error("TTS failed:", error);

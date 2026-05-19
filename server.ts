@@ -4,11 +4,15 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import * as dotenv from 'dotenv';
+
+// Load environment variables as early as possible
+dotenv.config();
 
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { pipeline } from "stream/promises";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI, Modality } from "@google/genai";
 import { v2 } from '@google-cloud/translate';
 
 const { Translate } = v2;
@@ -17,15 +21,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Gemini
-let aiInstance: GoogleGenerativeAI | null = null;
+let aiInstance: GoogleGenAI | null = null;
 const getAI = () => {
   if (!aiInstance) {
-    const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY1 || process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      console.warn("⚠️ Warning: GEMINI_API_KEY is missing. TTS will not work.");
+      console.warn("⚠️ Warning: GEMINI_API_KEY or GEMINI_API_KEY1 is missing from environment. TTS will not work.");
       return null;
     }
-    aiInstance = new GoogleGenerativeAI(apiKey);
+    console.log("Initializing Gemini AI with API Key from environment (" + (process.env.GEMINI_API_KEY1 ? "GEMINI_API_KEY1" : "GEMINI_API_KEY") + ")");
+    aiInstance = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
   }
   return aiInstance;
 };
@@ -36,9 +48,10 @@ const getTranslate = () => {
   if (!translateClient) {
     const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
     if (!apiKey) {
-      console.warn("⚠️ Warning: GOOGLE_TRANSLATE_API_KEY is missing. Translations will use fallback.");
+      console.warn("⚠️ Warning: GOOGLE_TRANSLATE_API_KEY is missing from environment. Translations will use fallback.");
       return null;
     }
+    console.log("Initializing Cloud Translate with API Key (first 5 chars):", apiKey.substring(0, 5) + "...");
     translateClient = new Translate({ key: apiKey });
   }
   return translateClient;
@@ -153,48 +166,59 @@ async function startServer() {
     const modelName = (req.params.productName || req.query.modelName) as string;
     if (!modelName) return res.status(400).json({ error: "modelName is required" });
 
-    // Use the provided Azure API URL structure
-    const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/ModelsParts/productName/${encodeURIComponent(modelName)}`;
+    const tryFetchParts = async (name: string) => {
+      // Clean name: remove extension and use strictly for the API call
+      const cleanName = name.replace(/\.[^/.]+$/, "");
+      const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/ModelsParts/productName/${encodeURIComponent(cleanName)}`;
+      
+      try {
+        console.log(`Strict Fetching model parts: ${azureApiUrl}`);
+        const response = await fetchWithTimeout(azureApiUrl, {}, 15000); // 15s timeout
+        
+        if (!response.ok) return null;
+
+        const text = await response.text();
+        if (!text || text.trim() === "") return null;
+        
+        try {
+          const data = JSON.parse(text);
+          // Standardize response to part objects
+          const rawParts = Array.isArray(data) ? data : (data.parts || data.data || data.items || []);
+          
+          if (rawParts.length === 0) return null;
+
+          return rawParts.map((item: any) => ({
+            id: (item.partId || item.PartId || Math.random().toString(36).substr(2, 9)).toString(),
+            modelName: name,
+            partName: item.displayName || item.display_name || item.partName || item.PartName || item.partKey || item.PartKey || "Unnamed Part",
+            partKey: item.partKey || item.PartKey || "",
+            description: item.description || item.Description || "",
+            presentAtSite: item.presentAtSite ?? item.PresentAtSite ?? true // Default to true if not provided by API
+          }));
+        } catch (jsonErr) {
+          console.error("Invalid JSON for parts:", jsonErr);
+          return null;
+        }
+      } catch (err) {
+        console.error(`Parts fetch failed for ${cleanName}:`, err);
+        return null;
+      }
+    };
 
     try {
-      console.log(`Fetching model parts from Azure API: ${azureApiUrl}`);
-      const response = await fetchWithTimeout(azureApiUrl, {}, 45000);
-      
-      if (!response.ok) {
-        throw new Error(`Azure API responded with status: ${response.status}`);
-      }
+      // Use strictly the modelName (usually the filename) for the parts lookup
+      const parts = await tryFetchParts(modelName);
 
-      const text = await response.text();
-      if (!text || text.trim() === "") throw new Error("Azure API returned an empty response");
-      
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (jsonErr) {
-        throw new Error("Azure API returned invalid JSON");
+      if (parts && parts.length > 0) {
+        return res.json(parts);
       }
       
-      // Map the Azure API response to our ModelPart interface
-      const parts = Array.isArray(data) ? data.map((item: any) => ({
-        id: (item.partId || item.PartId || Math.random().toString(36).substr(2, 9)).toString(),
-        modelName: modelName,
-        partName: item.displayName || item.display_name || item.partKey || item.PartKey || "",
-        partKey: item.partKey || item.PartKey || "",
-        description: item.description || item.Description || "",
-        linkTo: item.linkTo || item.LinkTo || ""
-      })) : [];
-
-      res.json(parts); // Send array directly as suggested by frontend update
+      // If no strict match found, return empty array (NO fallbacks/mocks)
+      console.warn(`No DB parts found for strictly matched model: ${modelName}`);
+      res.json([]);
     } catch (err: any) {
-      console.error("Azure API Error:", err);
-      
-      // Fallback to mock data if the API call fails or is not yet configured
-      console.warn("Falling back to mock data due to API error.");
-      const mockParts = [
-        { id: 'mock-1', modelName, partName: 'Axe_Head', partKey: 'HEAD-001', description: 'Heavy steel head, forged for maximum impact.' },
-        { id: 'mock-2', modelName, partName: 'Handle', partKey: 'HNDL-042', description: 'Ergonomic wooden handle with leather grip.' }
-      ];
-      res.json(mockParts);
+      console.error("Azure API Error (Global):", err);
+      res.status(500).json({ error: "Internal server error during parts fetch" });
     }
   });
 
@@ -682,9 +706,12 @@ If you cannot translate a string, return the original.
 List:
 ${JSON.stringify(texts)}`;
 
-        const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const result = await model.generateContent(prompt);
-        const responseText = result.response.text().trim();
+        const modelName = "gemini-3-flash-preview";
+        const result = await ai.models.generateContent({
+          model: modelName,
+          contents: [{ role: "user", parts: [{ text: prompt }] }]
+        });
+        const responseText = (result.text || "").trim();
         
         let translatedArray: string[] = [];
         const jsonMatch = responseText.match(/\[.*\]/s);
@@ -729,27 +756,29 @@ ${JSON.stringify(texts)}`;
       const hint = langCode === 'he' ? `Speak this Hebrew text clearly: ${text}` : 
                  langCode === 'ar' ? `Speak this Arabic text clearly: ${text}` : text;
 
-      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const result = await model.generateContent({
+      const modelName = "gemini-3.1-flash-tts-preview";
+      const result = await ai.models.generateContent({
+        model: modelName,
         contents: [{ role: "user", parts: [{ text: hint }] }],
-        generationConfig: {
-          //@ts-ignore
-          responseModalities: ["AUDIO"],
+        config: {
+          responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
+              prebuiltVoiceConfig: {
+                voiceName: 'Kore' 
+              },
             },
           },
         },
       });
 
-      const part = result.response.candidates?.[0]?.content?.parts?.[0];
-      const audioBase64 = part?.inlineData?.data;
+      const audioBase64 = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
 
       if (audioBase64) {
         res.json({ audio: audioBase64 });
       } else {
-        res.status(500).json({ error: "No audio generated" });
+        console.error("No audio content in Gemini 3.1 response:", JSON.stringify(result).substring(0, 500));
+        res.status(500).json({ error: "No audio generated", details: "Response did not contain audio data" });
       }
     } catch (err: any) {
       console.error("TTS API Error:", err);
