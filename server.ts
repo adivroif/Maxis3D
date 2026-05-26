@@ -12,7 +12,7 @@ dotenv.config();
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { pipeline } from "stream/promises";
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality, ThinkingLevel } from "@google/genai";
 import { v2 } from '@google-cloud/translate';
 
 const { Translate } = v2;
@@ -46,7 +46,7 @@ const getAI = () => {
 let translateClient: v2.Translate | null = null;
 const getTranslate = () => {
   if (!translateClient) {
-    const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
+    const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY1 || process.env.GEMINI_API_KEY;
     if (!apiKey) {
       console.warn("⚠️ Warning: GOOGLE_TRANSLATE_API_KEY is missing from environment. Translations will use fallback.");
       return null;
@@ -334,6 +334,64 @@ async function startServer() {
     } catch (err: any) {
       console.error("Azure Product Details API Error:", err);
       res.status(500).json({ error: "Failed to fetch product details", details: err.message });
+    }
+  });
+
+  // NEW: API Proxy Routes for Product Views, Likes, Dislikes, and Time
+  app.put("/api/products/:productId/view", async (req, res) => {
+    const { productId } = req.params;
+    const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/Products/${encodeURIComponent(productId)}/view`;
+    try {
+      console.log(`PUT request for view proxy: ${azureApiUrl}`);
+      const response = await fetchWithTimeout(azureApiUrl, {
+        method: "PUT"
+      }, 15000);
+      if (!response.ok) {
+        return res.status(response.status).send(await response.text());
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (err: any) {
+      console.error(`Error in view proxy for product ${productId}:`, err);
+      res.status(500).json({ error: "Failed to increment view", details: err.message });
+    }
+  });
+
+  app.put("/api/products/:productId/like", async (req, res) => {
+    const { productId } = req.params;
+    const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/Products/${encodeURIComponent(productId)}/like`;
+    try {
+      console.log(`PUT request for like proxy: ${azureApiUrl}`);
+      const response = await fetchWithTimeout(azureApiUrl, {
+        method: "PUT"
+      }, 15000);
+      if (!response.ok) {
+        return res.status(response.status).send(await response.text());
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (err: any) {
+      console.error(`Error in like proxy for product ${productId}:`, err);
+      res.status(500).json({ error: "Failed to like product", details: err.message });
+    }
+  });
+
+  app.put("/api/products/:productId/dislike", async (req, res) => {
+    const { productId } = req.params;
+    const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/Products/${encodeURIComponent(productId)}/dislike`;
+    try {
+      console.log(`PUT request for dislike proxy: ${azureApiUrl}`);
+      const response = await fetchWithTimeout(azureApiUrl, {
+        method: "PUT"
+      }, 15000);
+      if (!response.ok) {
+        return res.status(response.status).send(await response.text());
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (err: any) {
+      console.error(`Error in dislike proxy for product ${productId}:`, err);
+      res.status(500).json({ error: "Failed to dislike product", details: err.message });
     }
   });
 
@@ -642,17 +700,38 @@ async function startServer() {
     if (langMap[lowerLang]) {
       langCode = langMap[lowerLang];
     } else if (lowerLang.length > 2 && !lowerLang.includes('-')) {
-      // If it's a long name not in map, default to something or try to use it as-is (might fail)
       console.warn(`Unknown language name: ${targetLanguage}, using as-is.`);
     } else if (lowerLang.includes('-')) {
-      // Handle codes like he-IL -> he
       langCode = lowerLang.split('-')[0];
     }
+
+    // Helper to preprocess technical codes/shorthands for natural translation
+    const preprocessForTranslation = (text: string): string => {
+      let cleaned = text.trim();
+      if (langCode !== 'en' && /[a-zA-Z]/.test(cleaned)) {
+        cleaned = cleaned
+          .replace(/\bPart\s*No\.?\s*:/gi, "Part Number:")
+          .replace(/\bPart\s*No\.?\b/gi, "Part Number")
+          .replace(/\bPart\s*Number\s*:/gi, "Part Number:")
+          .replace(/\bP\/?N\s*:/gi, "Part Number:")
+          .replace(/\bP\s*N\s*:/gi, "Part Number:")
+          .replace(/\bP\.N\.\s*:/gi, "Part Number:")
+          .replace(/\bPart\s*ID\s*:/gi, "Part Number:")
+          .replace(/\bPart\s*ID\b/gi, "Part Number")
+          .replace(/\bOEM\s*:/gi, "OEM Manufacturer:")
+          .replace(/\bOEM\b/gi, "OEM Manufacturer")
+          .replace(/\bCategory\s*:/gi, "Category:")
+          .replace(/\bCategory\b/gi, "Category")
+          .replace(/\bProduct\s*Ref\.?\s*:/gi, "Product Reference:")
+          .replace(/\bProduct\s*Ref\.?\b/gi, "Product Reference");
+      }
+      return cleaned;
+    };
 
     // Filter out invalid items to prevent API errors
     const validTexts = texts.map(t => {
       if (t === null || t === undefined) return "";
-      return String(t).trim();
+      return preprocessForTranslation(String(t));
     }).filter(t => t.length > 0);
     
     if (validTexts.length === 0) {
@@ -660,129 +739,292 @@ async function startServer() {
       return res.json({ translated: texts });
     }
 
-    // Attempt Cloud Translation first
-    if (translate) {
-      try {
-        console.log(`Translating ${validTexts.length} items to codes='${langCode}' (from original '${targetLanguage}') using Google Cloud Translate (batched)...`);
-        
-        const BATCH_SIZE = 50;
-        const translatedResults: string[] = [];
-        
-        for (let i = 0; i < validTexts.length; i += BATCH_SIZE) {
-          const batch = validTexts.slice(i, i + BATCH_SIZE);
-          console.log(`Processing translation batch ${Math.floor(i/BATCH_SIZE) + 1} (${batch.length} items)...`);
+    const translatedResultsMap = new Map<string, string>();
+    const uniqueTexts = Array.from(new Set(validTexts));
+    
+    const BATCH_SIZE = 25;
+    for (let i = 0; i < uniqueTexts.length; i += BATCH_SIZE) {
+      const batch = uniqueTexts.slice(i, i + BATCH_SIZE);
+      let batchResults: string[] = [];
+      let success = false;
+
+      // Try 1: Google Cloud Translate
+      if (translate) {
+        try {
+          console.log(`[Translate API] Translating batch of ${batch.length} items to '${langCode}'...`);
           const [translations] = await translate.translate(batch, langCode);
-          const results = Array.isArray(translations) ? translations : [translations];
-          translatedResults.push(...results);
-        }
-        
-        // Map back to original array (including the empty/invalid ones we skipped)
-        let validIdx = 0;
-        const finalResults = texts.map(t => {
-          if (t !== null && t !== undefined && String(t).trim().length > 0) {
-            return translatedResults[validIdx++] || String(t);
+          batchResults = Array.isArray(translations) ? translations : [translations];
+          if (batchResults.length === batch.length) {
+            success = true;
+            console.log(`[Translate API] Batch translated successfully.`);
           }
-          return t;
-        });
-        
-        return res.json({ translated: finalResults });
-      } catch (err: any) {
-        console.error("Cloud Translation API Error details:", err);
-        // If it's a 400 error (Invalid Value), it's likely the language code
-        if (err.code === 400 || err.message?.includes('Invalid Value')) {
-          console.warn(`Invalid language code '${langCode}' for Cloud Translate. Trying fallback...`);
+        } catch (err: any) {
+          console.error("[Translate API] Error in Cloud Translation batch:", err.message || err);
         }
+      }
+
+      // Try 2: Gemini Fallback with JSON structured schema
+      if (!success && ai) {
+        try {
+          console.log(`[Gemini Fallback] Translating batch of ${batch.length} items to '${targetLanguage}'...`);
+          const prompt = `You are a professional translator. Translate this array of strings to correct and natural ${targetLanguage}:\n${JSON.stringify(batch)}\n\nIMPORTANT: Maintain technical and 3D model terminology correctly and output the exact same number of items in the response array (exactly ${batch.length} items).`;
+          
+          const result = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: "ARRAY",
+                items: { type: "STRING" },
+                description: "List of translated texts matching the exact sequence and length of the inputs."
+              }
+            }
+          });
+
+          const responseText = (result.text || "").trim();
+          const parsed = JSON.parse(responseText);
+          if (Array.isArray(parsed) && parsed.length === batch.length) {
+            batchResults = parsed;
+            success = true;
+            console.log(`[Gemini Fallback] Batch translated successfully via structured schema.`);
+          } else {
+            console.warn(`[Gemini Fallback] Schema output length mismatch or not an array. Expected ${batch.length}, got ${parsed?.length}.`);
+          }
+        } catch (geminiErr: any) {
+          console.error("[Gemini Fallback] Gemini translation failed for batch:", geminiErr.message || geminiErr);
+        }
+      }
+
+      // Try 3: If batch translation failed entirely, try items individually
+      if (!success) {
+        console.warn(`[Fallback] Batch translation failed, falling back to individual item translation for ${batch.length} items...`);
+        for (const item of batch) {
+          let itemResult = item;
+          let itemSuccess = false;
+
+          if (translate) {
+            try {
+              const [translation] = await translate.translate(item, langCode);
+              itemResult = translation;
+              itemSuccess = true;
+            } catch (err) {}
+          }
+
+          if (!itemSuccess && ai) {
+            try {
+              const prompt = `Translate this text to ${targetLanguage}. Return ONLY the direct translation. Text: "${item}"`;
+              const result = await ai.models.generateContent({
+                model: "gemini-3.5-flash",
+                contents: [{ role: "user", parts: [{ text: prompt }] }]
+              });
+              itemResult = cleanTranslationText(result.text || item);
+              itemSuccess = true;
+            } catch (err) {}
+          }
+
+          translatedResultsMap.set(item, itemResult);
+        }
+      } else {
+        batch.forEach((item, idx) => {
+          translatedResultsMap.set(item, batchResults[idx] || item);
+        });
       }
     }
 
-    // Fallback to Gemini if Translate is missing or fails
-    if (ai) {
+    // Map back to original input array (preserving indices and empty/invalid values)
+    const finalResults = texts.map(t => {
+      if (t !== null && t !== undefined && String(t).trim().length > 0) {
+        const cleaned = preprocessForTranslation(String(t));
+        return translatedResultsMap.get(cleaned) || String(t);
+      }
+      return t;
+    });
+
+    res.json({ translated: finalResults });
+  });
+
+  const cleanTranslationText = (txt: string): string => {
+    return txt
+      .replace(/^(translation|translated text|hebrew|arabic|russian|english|עברית|ערבית|רוסית|אנגלית):\s*/i, '')
+      .replace(/^["'“”]|["'“”]$/g, '') // Remove quotes including smart quotes
+      .replace(/\*\*+/g, "") // Remove bold markdown symbols
+      .replace(/__+/g, "")
+      .replace(/`+/g, "")
+      .replace(/\[[^\]]*\]/g, "") // Remove brackets with text inside (e.g. [Mesh], [Object])
+      .replace(/נ"צ מוצר/g, "מק\"ט")
+      .replace(/נ"צ/g, "מק\"ט")
+      // Replace colons, semicolons, and dashes representing labels/separators with a full stop and space to force a beautiful pause between sections
+      .replace(/:/g, ".  ")
+      .replace(/;/g, ".  ")
+      .replace(/\s*[\/\\]\s*/g, ",  ") // Clean slashes with spacious commas
+      .replace(/[#*•\-_]+/g, " ") // Clean weird marks
+      // Keep pauses when reading lists or categories
+      .replace(/,\s*/g, ",  ") // Expand existing commas with a bit more spacing for breathing room
+      .replace(/\s+/g, " ") // Clean multiple spaces
+      .trim();
+  };
+
+  let cachedVoiceId: string | null = null;
+
+  const getElevenLabsVoiceId = async (apiKey: string): Promise<string> => {
+    if (cachedVoiceId) return cachedVoiceId;
+
+    try {
+      const resp = await fetch("https://api.elevenlabs.io/v1/voices", {
+        headers: { "xi-api-key": apiKey }
+      });
+      if (resp.ok) {
+        const data = await resp.json() as { voices: Array<{ voice_id: string; category: string; name: string }> };
+        const premade = (data.voices || []).filter(v => v.category === "premade");
+        if (premade.length > 0) {
+          const preferredVec = premade.find(v => ["Brian", "Rachel", "Bella", "Nicole", "Antoni", "Adam"].includes(v.name));
+          cachedVoiceId = preferredVec ? preferredVec.voice_id : premade[0].voice_id;
+          console.log(`[ElevenLabs] Dynamically selected premade voice: "${preferredVec?.name || premade[0].name}" (${cachedVoiceId})`);
+          return cachedVoiceId;
+        }
+      }
+    } catch (err) {
+      console.warn("Error fetching ElevenLabs voices list:", err);
+    }
+
+    // Stable, guaranteed premade voice ID (Bella)
+    return "EXAVITQu4vr4xnSDxMaL";
+  };
+
+  // Helper to generate TTS using ElevenLabs
+  const generateElevenLabsTTS = async (text: string): Promise<string> => {
+    const apiKey = process.env.API_Key_Eleven || process.env.API_KEY_ELEVEN || process.env.ELEVEN_API_KEY;
+    if (!apiKey) {
+      throw new Error("ElevenLabs API Key (API_Key_Eleven) is missing. Set it in Secrets.");
+    }
+
+    const cleanedText = cleanTranslationText(text);
+    if (!cleanedText) {
+      console.log("[ElevenLabs] Text became empty after sanitization. Returning empty audio representation.");
+      return "";
+    }
+
+    const voiceId = await getElevenLabsVoiceId(apiKey);
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        "accept": "audio/mpeg"
+      },
+      body: JSON.stringify({
+        text: cleanedText,
+        model_id: "eleven_multilingual_v2",
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.05,
+          use_speaker_boost: true
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`ElevenLabs API returned status ${response.status}: ${errorText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return buffer.toString("base64");
+  };
+
+  // API Route for combined Translation + TTS to reduce latency
+  app.post("/api/ai/fast-tts", async (req, res) => {
+    const { text, targetLanguage, langCode } = req.body;
+    if (!text || !targetLanguage || !langCode) return res.status(400).json({ error: "Missing required fields" });
+
+    try {
+      const startTime = Date.now();
+      
+      // 1. Translate (unless already in target code)
+      let textToSpeak = text;
+      // Preprocess technical words before translation so automated translators don't fail (e.g., translating "Part No" to "נ"צ")
+      if (langCode !== 'en' && /[a-zA-Z]/.test(textToSpeak)) {
+        textToSpeak = textToSpeak
+          .replace(/\bPart\s*No\.?\s*:/gi, "Part Number:")
+          .replace(/\bPart\s*No\.?\b/gi, "Part Number")
+          .replace(/\bPart\s*Number\s*:/gi, "Part Number:")
+          .replace(/\bP\/?N\s*:/gi, "Part Number:")
+          .replace(/\bP\s*N\s*:/gi, "Part Number:")
+          .replace(/\bP\.N\.\s*:/gi, "Part Number:")
+          .replace(/\bPart\s*ID\s*:/gi, "Part Number:")
+          .replace(/\bPart\s*ID\b/gi, "Part Number")
+          .replace(/\bOEM\s*:/gi, "OEM Manufacturer:")
+          .replace(/\bOEM\b/gi, "OEM Manufacturer");
+      }
+      const isHebrew = langCode === 'he';
+      const isArabic = langCode === 'ar';
+      const isRussian = langCode === 'ru';
+      const hasHebrew = /[\u0590-\u05FF]/.test(text);
+      const hasArabic = /[\u0600-\u06FF]/.test(text);
+      const hasRussian = /[\u0400-\u04FF]/.test(text);
+      const hasLatin = /[a-zA-Z]/.test(text);
+
+      const ai = getAI();
+      const needsTranslation = (langCode !== 'en' && hasLatin) || (isHebrew && !hasHebrew) || (isArabic && !hasArabic) || (isRussian && !hasRussian);
+
+      if (needsTranslation && ai) {
+        const transPrompt = `Translate this text to ${targetLanguage}. Return ONLY the direct translation. Do NOT include any explanations, surrounding quotes, markdown formatting, or introductory text. If there are technical parts or measurements, translate them naturally so they can be read aloud comfortably. Text: "${text}"`;
+        const transResult = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents: [{ role: "user", parts: [{ text: transPrompt }] }]
+        });
+        textToSpeak = cleanTranslationText(transResult.text || text);
+        console.log(`[FAST-TTS] Translation succeeded: "${text}" -> "${textToSpeak}"`);
+      }
+
+      // 2. TTS Generation (EXCLUSIVE to ElevenLabs)
+      const ttsStartTime = Date.now();
+      let audioBase64 = "";
+
       try {
-        console.log(`Falling back to Gemini for translation to ${targetLanguage}...`);
-        const prompt = `Translate the following list of strings to ${targetLanguage}. 
-Return ONLY a valid JSON array of strings in the exact same order.
-If you cannot translate a string, return the original.
-
-List:
-${JSON.stringify(texts)}`;
-
-        const modelName = "gemini-3-flash-preview";
-        const result = await ai.models.generateContent({
-          model: modelName,
-          contents: [{ role: "user", parts: [{ text: prompt }] }]
-        });
-        const responseText = (result.text || "").trim();
-        
-        let translatedArray: string[] = [];
-        const jsonMatch = responseText.match(/\[.*\]/s);
-        if (jsonMatch) {
-           try {
-             translatedArray = JSON.parse(jsonMatch[0]);
-           } catch (e) {
-             console.error("Gemini returned invalid JSON for translation.");
-             translatedArray = texts;
-           }
-        } else {
-          translatedArray = responseText.split('\n').filter(l => l.trim().length > 0);
-        }
-        
-        if (translatedArray.length === texts.length) {
-          return res.json({ translated: translatedArray });
-        } else {
-          console.warn(`Gemini returned ${translatedArray.length} items but expected ${texts.length}.`);
-        }
-      } catch (geminiErr: any) {
-        console.error("Gemini fallback translation failed:", geminiErr.message || geminiErr);
-        if (geminiErr.message?.includes('API key not valid')) {
-          console.warn("Gemini API Key is invalid. Check your environment settings.");
-        }
+        audioBase64 = await generateElevenLabsTTS(textToSpeak);
+      } catch (elevenErr: any) {
+        console.error(`[FAST-TTS] ElevenLabs audio generation failed: ${elevenErr.message || elevenErr}`);
+        return res.status(500).json({ error: "ElevenLabs Generation failed", details: elevenErr.message || String(elevenErr) });
       }
-    }
 
-    // Ultimate fallback: return originals
-    console.warn("All translation methods failed or were unavailable. Returning original texts.");
-    res.json({ translated: texts });
+      console.log(`[FAST-TTS] Total time: ${Date.now() - startTime}ms (ElevenLabs TTS portion: ${Date.now() - ttsStartTime}ms)`);
+
+      if (audioBase64 !== undefined) {
+        res.json({ audio: audioBase64, translatedText: textToSpeak });
+      } else {
+        res.status(500).json({ error: "No audio generated from ElevenLabs" });
+      }
+    } catch (err: any) {
+      console.error("Fast TTS Error:", err);
+      res.status(500).json({ error: "Fast TTS failed", details: err.message || String(err) });
+    }
   });
 
   // API Route for TTS
   app.post("/api/ai/tts", async (req, res) => {
-    const { text, langCode } = req.body;
+    const { text } = req.body;
     if (!text) return res.status(400).json({ error: "text is required" });
 
-    const ai = getAI();
-    if (!ai) return res.status(500).json({ error: "Gemini API not configured" });
-
+    const startTime = Date.now();
     try {
-      const hint = langCode === 'he' ? `Speak this Hebrew text clearly: ${text}` : 
-                 langCode === 'ar' ? `Speak this Arabic text clearly: ${text}` : text;
+      // EXCLUSIVE to ElevenLabs, no fallbacks to Google's TTS
+      const audioBase64 = await generateElevenLabsTTS(text);
+      console.log(`[TTS] ElevenLabs generated in ${Date.now() - startTime}ms for text length: ${text.length}`);
 
-      const modelName = "gemini-3.1-flash-tts-preview";
-      const result = await ai.models.generateContent({
-        model: modelName,
-        contents: [{ role: "user", parts: [{ text: hint }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: 'Kore' 
-              },
-            },
-          },
-        },
-      });
-
-      const audioBase64 = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
-
-      if (audioBase64) {
+      if (audioBase64 !== undefined) {
         res.json({ audio: audioBase64 });
       } else {
-        console.error("No audio content in Gemini 3.1 response:", JSON.stringify(result).substring(0, 500));
-        res.status(500).json({ error: "No audio generated", details: "Response did not contain audio data" });
+        res.status(500).json({ error: "No audio generated from ElevenLabs" });
       }
     } catch (err: any) {
       console.error("TTS API Error:", err);
-      res.status(500).json({ error: "TTS failed", detail: err.message });
+      res.status(500).json({ error: "TTS failed", details: err.message || String(err) });
     }
   });
 
@@ -1115,6 +1357,14 @@ ${JSON.stringify(texts)}`;
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log("=== API CONFIGURATION DIAGNOSTICS ===");
+    const hasTranslateKey = !!(process.env.GOOGLE_TRANSLATE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY1 || process.env.GEMINI_API_KEY);
+    const hasElevenKey = !!(process.env.API_Key_Eleven || process.env.API_KEY_ELEVEN || process.env.ELEVEN_API_KEY);
+    const hasGeminiKey = !!(process.env.GEMINI_API_KEY1 || process.env.GEMINI_API_KEY);
+    console.log(`- Google Translate API Key: ${hasTranslateKey ? "CONFIGURED (OK)" : "MISSING ⚠️"}`);
+    console.log(`- ElevenLabs API Key: ${hasElevenKey ? "CONFIGURED (OK)" : "MISSING ⚠️"}`);
+    console.log(`- Gemini API Key: ${hasGeminiKey ? "CONFIGURED (OK)" : "MISSING ⚠️"}`);
+    console.log("=====================================");
   });
 }
 
