@@ -1350,7 +1350,7 @@ const App: React.FC = () => {
       <div className={`absolute inset-0 z-10 transition-colors duration-1000 ${isNightMode ? 'bg-zinc-800/50' : 'bg-transparent'}`}>
         <Canvas 
           shadows 
-          dpr={isMobile ? 1 : [1, 1.5]} 
+          dpr={[1, 2]} 
           gl={{ 
             antialias: true, 
             alpha: true,
