@@ -269,8 +269,8 @@ function checkAzureAvailability(): boolean {
   return true;
 }
 
-async function robustFetchWithRetry(url: string, options: any = {}, initialTimeout = 5000, maxRetries = 2) {
-  if (!checkAzureAvailability()) {
+async function robustFetchWithRetry(url: string, options: any = {}, initialTimeout = 5000, maxRetries = 2, bypassCircuitBreaker = false) {
+  if (!bypassCircuitBreaker && !checkAzureAvailability()) {
     throw new Error("Azure API is currently unreachable (Circuit Breaker active)");
   }
 
@@ -279,7 +279,7 @@ async function robustFetchWithRetry(url: string, options: any = {}, initialTimeo
   let timeout = initialTimeout;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    console.log(`[robustFetch] Attempt ${attempt}/${maxRetries} for URL: ${url} (timeout: ${timeout}ms)`);
+    console.log(`[robustFetch] Attempt ${attempt}/${maxRetries} for URL: ${url} (timeout: ${timeout}ms, bypassCircuitBreaker: ${bypassCircuitBreaker})`);
     try {
       const response = await fetchWithTimeout(url, options, timeout);
       
@@ -302,7 +302,7 @@ async function robustFetchWithRetry(url: string, options: any = {}, initialTimeo
       console.warn(`[robustFetch] Attempt ${attempt} failed with error: ${err.message}. Retrying in ${delay}ms...`);
       
       // System socket timeouts or HTTP abort errors trip the circuit breaker
-      if (err.message && (err.message.includes("timed out") || err.message.includes("timeout") || err.code === "ECONNREFUSED" || err.code === "ETIMEDOUT" || err.name === "AbortError")) {
+      if (!bypassCircuitBreaker && err.message && (err.message.includes("timed out") || err.message.includes("timeout") || err.code === "ECONNREFUSED" || err.code === "ETIMEDOUT" || err.name === "AbortError")) {
         markAzureAsUnreachable();
       }
     }
@@ -315,7 +315,9 @@ async function robustFetchWithRetry(url: string, options: any = {}, initialTimeo
   }
 
   // If all attempts failed
-  markAzureAsUnreachable();
+  if (!bypassCircuitBreaker) {
+    markAzureAsUnreachable();
+  }
   throw lastErr || new Error(`Failed after ${maxRetries} attempts`);
 }
 
@@ -506,14 +508,14 @@ async function startServer() {
     const modelName = (req.params.productName || req.query.modelName) as string;
     if (!modelName) return res.status(400).json({ error: "modelName is required" });
 
-    const tryFetchParts = async (name: string, timeout = 5000, maxRetries = 2) => {
+    const tryFetchParts = async (name: string, timeout = 5000, maxRetries = 2, bypassCircuitBreaker = false) => {
       // Clean name: remove extension and use strictly for the API call
       const cleanName = name.replace(/\.[^/.]+$/, "");
       const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/ModelsParts/productName/${encodeURIComponent(cleanName)}`;
 
       try {
-        console.log(`Strict Fetching model parts: ${azureApiUrl}`);
-        const response = await robustFetchWithRetry(azureApiUrl, {}, timeout, maxRetries);
+        console.log(`Strict Fetching model parts: ${azureApiUrl} (bypassCircuitBreaker: ${bypassCircuitBreaker})`);
+        const response = await robustFetchWithRetry(azureApiUrl, {}, timeout, maxRetries, bypassCircuitBreaker);
 
         if (!response.ok) {
           throw new Error(`Azure API responded with status: ${response.status}`);
@@ -552,14 +554,15 @@ async function startServer() {
     };
 
     const cachedParts = getCachedParts(modelName);
+    const hasCache = cachedParts && cachedParts.length > 0;
 
-    if (cachedParts && cachedParts.length > 0) {
+    if (hasCache) {
       console.log(`[Cache First] Serving model parts instantly from cache for: ${modelName}`);
 
       // Asynchronously refresh in the background
       (async () => {
         try {
-          await tryFetchParts(modelName, 3500, 1);
+          await tryFetchParts(modelName, 3500, 1, false);
         } catch (bgErr: any) {
           console.log(`[Cache Background Update Status] Skip refreshing model parts: ${bgErr.message}`);
         }
@@ -570,7 +573,7 @@ async function startServer() {
 
     try {
       // Use strictly the modelName (usually the filename) for the parts lookup
-      let parts = await tryFetchParts(modelName, 5000, 2);
+      let parts = await tryFetchParts(modelName, 5000, 2, !hasCache);
 
       // FALLBACK: If API query failed (due to timeout/network) or returned empty, check our local persistent cache
       if (!parts || parts.length === 0) {
@@ -601,7 +604,7 @@ async function startServer() {
 
     try {
       console.log(`Fetching inventory from Azure API: ${azureApiUrl}`);
-      const response = await robustFetchWithRetry(azureApiUrl, {}, 4500, 2);
+      const response = await robustFetchWithRetry(azureApiUrl, {}, 4500, 2, true);
       
       if (!response.ok) {
         throw new Error(`Azure API responded with status: ${response.status}`);
@@ -648,10 +651,10 @@ async function startServer() {
 
     const hasCache = fs.existsSync(cachePath);
 
-    const tryFetch = async (title: string, timeout = 3500, maxRetries = 2) => {
+    const tryFetch = async (title: string, timeout = 3500, maxRetries = 2, bypassCircuitBreaker = !hasCache) => {
       try {
         const url = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/Products/productTitle/${encodeURIComponent(title)}`;
-        const resp = await robustFetchWithRetry(url, {}, timeout, maxRetries);
+        const resp = await robustFetchWithRetry(url, {}, timeout, maxRetries, bypassCircuitBreaker);
         if (!resp.ok) return null;
         
         const text = await resp.text();
@@ -696,16 +699,16 @@ async function startServer() {
         
         (async () => {
           try {
-            let data = await tryFetch(cleanModelName, 3000, 1);
+            let data = await tryFetch(cleanModelName, 3000, 1, true);
             if (!data) {
               for (const variant of uniqueVariations) {
                 if (variant === cleanModelName) continue;
-                data = await tryFetch(variant, 1500, 1);
+                data = await tryFetch(variant, 1500, 1, true);
                 if (data) break;
               }
             }
             if (!data && !uniqueVariations.includes("Connector")) {
-              data = await tryFetch("Connector", 1500, 1);
+              data = await tryFetch("Connector", 1500, 1, true);
             }
             if (data) {
               if (!fs.existsSync(productsCacheDir)) {
@@ -962,7 +965,7 @@ async function startServer() {
     const azureFileUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-file?folder=${folder}&fileName=${encodeURIComponent(fileName)}&clientName=${activeClient}`;
     try {
       console.log(`[Proxy] Resilient request for ${folder}/${fileName}. URL: ${azureFileUrl} (cacheStatus: MISS)`);
-      const response = await robustFetchWithRetry(azureFileUrl, {}, 20000, 2);
+      const response = await robustFetchWithRetry(azureFileUrl, {}, 20000, 2, true);
       
       if (!response.ok) {
         throw new Error(`Azure responded with non-ok status: ${response.status}`);
@@ -1108,7 +1111,7 @@ async function startServer() {
         (async () => {
           try {
             const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-files?folder=${folder}&clientName=${activeClient}`;
-            const response = await robustFetchWithRetry(azureApiUrl, {}, 3500, 1);
+            const response = await robustFetchWithRetry(azureApiUrl, {}, 3500, 1, true);
             if (response.ok) {
               const data = await response.json();
               fs.writeFileSync(cachePath, JSON.stringify(data, null, 2), "utf8");
@@ -1144,7 +1147,7 @@ async function startServer() {
       const retries = hasCache ? 1 : 2;
       
       console.log(`Fetching files from Azure API: ${azureApiUrl} (cacheStatus: ${hasCache ? "CACHED" : "MISS"})`);
-      const response = await robustFetchWithRetry(azureApiUrl, {}, timeout, retries);
+      const response = await robustFetchWithRetry(azureApiUrl, {}, timeout, retries, !hasCache);
       if (!response.ok) {
         throw new Error(`Azure API responded with status: ${response.status}`);
       }
@@ -1280,7 +1283,7 @@ async function startServer() {
         (async () => {
           try {
             const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-files?folder=${folder}&clientName=${activeClient}`;
-            const response = await robustFetchWithRetry(azureApiUrl, {}, 3500, 1);
+            const response = await robustFetchWithRetry(azureApiUrl, {}, 3500, 1, true);
             if (response.ok) {
               const data = await response.json();
               fs.writeFileSync(cachePath, JSON.stringify(data, null, 2), "utf8");
@@ -1323,7 +1326,7 @@ async function startServer() {
     try {
       const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-files?folder=${folder}&clientName=${activeClient}`;
       console.log(`Fetching image list from Azure for model filtering: ${azureApiUrl} (cacheStatus: MISS)`);
-      const response = await robustFetchWithRetry(azureApiUrl, {}, 10000, 2);
+      const response = await robustFetchWithRetry(azureApiUrl, {}, 10000, 2, !hasCache);
       if (!response.ok) {
         throw new Error(`Azure API responded with status: ${response.status}`);
       }
