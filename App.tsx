@@ -46,6 +46,36 @@ const CameraHandler: React.FC<{
   return null;
 };
 
+const isModelTextureMatch = (fileName: string, modelName: string): boolean => {
+  if (!fileName || !modelName) return false;
+
+  // 1. Remove standard extensions from ends of names before comparison
+  const cleanExtension = (str: string) => {
+    return str.replace(/\.(fbx|obj|gltf|glb|png|jpg|jpeg|webp|tga|dds|gif|bmp|tiff)$/i, '').trim();
+  };
+
+  const fNameNoExt = cleanExtension(fileName);
+  const mNameNoExt = cleanExtension(modelName);
+
+  // 2. Normalize by converting to lowercase and replacing word separators with single underscore
+  const normalize = (str: string) => {
+    return str.toLowerCase().trim().replace(/[\s\-_.]+/g, '_');
+  };
+
+  const fNorm = normalize(fNameNoExt);
+  const mNorm = normalize(mNameNoExt);
+
+  // 3. Verify that the texture base name starts with the model base name
+  if (!fNorm.startsWith(mNorm)) return false;
+
+  // 4. Ensure word boundary matching to avoid substrings like 'Desk' matching 'Desktop'
+  const nextChar = fNorm.charAt(mNorm.length);
+  if (!nextChar) return true; // exact match
+
+  const isAlphanumeric = /[a-z0-9]/.test(nextChar);
+  return !isAlphanumeric;
+};
+
 const App: React.FC = () => {
   const [models, setModels] = useState<SceneModelInstance[]>([]);
   const [catalogFiles, setCatalogFiles] = useState<any[]>([]);
@@ -106,7 +136,7 @@ const App: React.FC = () => {
           const folder = 'images';
           const modelName = model.name;
           const clientName = 'tenantA';
-          const response = await fetch(`/api/files/get-images-by-model?folder=${encodeURIComponent(folder)}&modelName=${encodeURIComponent(modelName)}&clientName=${clientName}`);
+          const response = await fetch(`/api/files/get-images-by-model?folder=${encodeURIComponent(folder)}&modelName=${encodeURIComponent(modelName)}&clientName=${clientName}&v=3`);
           if (!response.ok) {
             fetchingModels.current.delete(model.id);
             return;
@@ -147,7 +177,7 @@ const App: React.FC = () => {
     const fetchCatalog = async () => {
       setIsLoadingCatalog(true);
       try {
-        const response = await fetch('/api/files/get-files?folder=tenants&clientName=tenantA');
+        const response = await fetch('/api/files/get-files?folder=tenants&clientName=tenantA&v=3');
         if (response.ok) {
           const rawData = await response.json();
           const getListData = (raw: any) => {
@@ -163,7 +193,7 @@ const App: React.FC = () => {
               if (typeof item === 'string') return { key: item, name: item, url: item };
               const name = item.fileName || item.FileName || item.filename || item.Name || item.name || "";
               const key = item.fullPath || item.FullPath || item.fullpath || item.Key || item.item_key || item.key || name || "";
-              const url = `/api/files/get-file?folder=tenants&clientName=tenantA&fileName=${encodeURIComponent(name)}`;
+              const url = `/api/files/get-file?folder=tenants&clientName=tenantA&fileName=${encodeURIComponent(name)}&v=3`;
               return { key, name, url };
             })
             .filter((f: any) => f.name.toLowerCase().endsWith(".fbx") || f.key.toLowerCase().endsWith(".fbx"));
@@ -181,7 +211,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const fetchTextures = async () => {
       try {
-        const response = await fetch('/api/files/get-files?folder=images&clientName=tenantA');
+        const response = await fetch('/api/files/get-files?folder=images&clientName=tenantA&v=3');
         if (response.ok) {
           const raw = await response.json();
           const getListData = (r: any) => {
@@ -196,7 +226,7 @@ const App: React.FC = () => {
           const extracted = list.map((item: any) => {
             const name = item.fileName || item.FileName || item.filename || item.Name || item.name || item.Title || item.title || "";
             const key = item.fullPath || item.FullPath || item.fullpath || item.Key || item.item_key || item.key || item.FilePath || name || "";
-            const url = `/api/files/get-file?folder=images&clientName=tenantA&fileName=${encodeURIComponent(name)}`;
+            const url = `/api/files/get-file?folder=images&clientName=tenantA&fileName=${encodeURIComponent(name)}&v=3`;
             return { key, name, url };
           }).filter((f: any) => {
             const lowName = f.name.toLowerCase();
@@ -228,7 +258,7 @@ const App: React.FC = () => {
       const fetchProductDetails = async () => {
         setIsFetchingDetails(true);
         try {
-          const response = await fetch(`/api/product-details?modelName=${encodeURIComponent(selectedModel.name)}`);
+          const response = await fetch(`/api/product-details?modelName=${encodeURIComponent(selectedModel.name)}&v=3`);
           if (response.ok) {
             const text = await response.text();
             if (text && text.trim().length > 0) {
@@ -505,7 +535,8 @@ const App: React.FC = () => {
     hoveredMaterial: null, isExploded: false, explodeFactor: 0,
     isPlayingAnimation: false,
     animationDirection: 'backward',
-    colorVariants: [], activeVariant: null
+    colorVariants: [], activeVariant: null,
+    flipY: true
   });
 
   const handlePartClick = useCallback(async (part: { id: string, name: string, description: string, position: THREE.Vector3, size: THREE.Vector3, mesh: THREE.Mesh } | null) => {
@@ -728,12 +759,7 @@ const App: React.FC = () => {
           const modelNameBase = model.name.toLowerCase().split('.')[0];
           const cleanModelName = modelNameBase.replace(/[^a-z0-9]/g, '');
           
-          // Check if texture name starts with model name or contains it as a distinct word
-          const isPrefixMatch = texNameNoExt.startsWith(modelNameBase);
-          const isWordMatch = new RegExp(`(^|[\\s_\\d])${modelNameBase}([\\s_\\d]|$)`, 'i').test(texNameNoExt);
-          const isCleanMatch = cleanTexName.includes(cleanModelName);
-          
-          let isModelMatch = isPrefixMatch || isWordMatch || isCleanMatch;
+          let isModelMatch = isModelTextureMatch(texNameNoExt, modelNameBase);
 
           // Prevent "Axe" matching "AxeHead" if "AxeHead" is another model
           if (isModelMatch) {
@@ -750,56 +776,102 @@ const App: React.FC = () => {
           
           if (!isModelMatch) return null;
 
-          // Find part number - look for numbers that aren't part of the model name
-          const nameWithoutModel = texNameNoExt.replace(modelNameBase, '');
-          const texNumMatch = nameWithoutModel.match(/\d+/);
-          const texNum = texNumMatch ? texNumMatch[0] : null;
-
-          // Find target material
+          // ── SCORED MATERIAL MATCHING ──────────────────────────────────────
           let targetMat = null;
-          if (texNum !== null) {
-            const parsedTexNum = parseInt(texNum);
-            // Priority 1: Exact number match in material name
-            targetMat = sortedMaterials.find(m => {
-              const mNumMatch = m.match(/\d+/);
-              if (!mNumMatch) return false;
-              const mNum = parseInt(mNumMatch[0]);
-              return mNum === parsedTexNum;
-            });
-            
-            // Priority 2: Index match (1-based)
-            if (!targetMat) {
-              const idx = parsedTexNum - 1;
-              if (idx >= 0 && idx < sortedMaterials.length) targetMat = sortedMaterials[idx];
+          let bestScore = -1;
+
+          const colorWords = [...colorNames, 'golden', 'silver', 'blue', 'gray', 'grey', 'yellow', 'wooden', 'wood', 'steel', 'metal', 'psilver', 'pblue', 'pgold', 'pgolden', 'pwooden'];
+
+          // Clean texture tokens - de-duplicate to avoid double matching single words
+          const texTokens = Array.from(new Set(
+            texNameNoExt
+              .split(/[\s_.-]+/)
+              .filter((t: string) => t && t !== cleanModelName && t !== 'png')
+          )) as string[];
+          const texTokensNoColor: string[] = texTokens.filter((t: string) => !colorWords.includes(t));
+
+          for (const mat of sortedMaterials) {
+            const cleanM = mat.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const matTokens = Array.from(new Set(
+              mat.toLowerCase()
+                .split(/[\s_.-]+/)
+                .filter((t: string) => t && t !== cleanModelName)
+            )) as string[];
+            const matTokensNoColor: string[] = matTokens.filter((t: string) => !colorWords.includes(t));
+
+            let score = 0;
+
+            // 1. Exact match
+            if (cleanM === cleanTexName) {
+              score += 1000;
+            }
+
+            // 2. Token overlap score
+            let matchedTokenCount = 0;
+            for (const tTok of texTokensNoColor) {
+              for (const mTok of matTokensNoColor) {
+                if (tTok === mTok) {
+                  matchedTokenCount++;
+                } else if (tTok.includes(mTok) || mTok.includes(tTok)) {
+                  if (tTok.length > 2 && mTok.length > 2) {
+                    matchedTokenCount += 0.5;
+                  }
+                }
+              }
+            }
+
+            let structuralMatches = matchedTokenCount * 50;
+            let densityBonus = 0;
+            if (matchedTokenCount > 0 && matTokensNoColor.length > 0) {
+              const density = Math.min(matchedTokenCount / matTokensNoColor.length, 1.0);
+              densityBonus = density * 150; 
+            }
+            score += structuralMatches + densityBonus;
+
+            // 3. Color matchmaking
+            const texColors = texTokens.filter((t: string) => colorWords.includes(t));
+            const matColors = matTokens.filter((t: string) => colorWords.includes(t));
+
+            let colorMismatch = false;
+            let colorMatch = false;
+
+            if (texColors.length > 0 && matColors.length > 0) {
+              const hasSharedColor = texColors.some((tc: string) => matColors.some((mc: string) => {
+                const c1 = tc.replace(/^p/i, '');
+                const c2 = mc.replace(/^p/i, '');
+                return c1 === c2 || c1.includes(c2) || c2.includes(c1);
+              }));
+
+              if (hasSharedColor) {
+                colorMatch = true;
+              } else {
+                colorMismatch = true;
+              }
+            }
+
+            if (colorMatch) score += 100;
+            if (colorMismatch) score -= 20;
+
+            // 4. Substring containment support
+            if (matchedTokenCount > 0) {
+              const mPart = cleanM.replace(cleanModelName, '');
+              const tPart = cleanTexName.replace(cleanModelName, '');
+              if (mPart && tPart) {
+                if (tPart.includes(mPart)) {
+                  score += 15;
+                } else if (mPart.includes(tPart)) {
+                  score += 10;
+                }
+              }
+            }
+
+            if (score > bestScore && score > 0) {
+              bestScore = score;
+              targetMat = mat;
             }
           }
-          
-          // Priority 3: Segment-based name match
-          if (!targetMat) {
-            const segments = texNameNoExt.split(/[\s_]/);
-            targetMat = sortedMaterials.find(m => {
-              const cleanM = m.toLowerCase().replace(/[^a-z0-9]/g, '');
-              // Check if any segment (that isn't the model name or a color) matches the material name
-              return segments.some(seg => {
-                if (seg === cleanModelName || colorNames.includes(seg)) return false;
-                return seg === cleanM || (cleanM.length > 2 && seg.length > 2 && (cleanM.includes(seg) || seg.includes(cleanM)));
-              });
-            });
-          }
 
-          // Priority 4: Original fuzzy match
-          if (!targetMat) {
-            targetMat = sortedMaterials.find(m => {
-              const cleanM = m.toLowerCase().replace(/[^a-z0-9]/g, '');
-              // Remove model name from material name to compare only the "part" part
-              const cleanMPart = cleanM.replace(cleanModelName, '');
-              const cleanTexPart = cleanTexName.replace(cleanModelName, '');
-              return (cleanMPart && cleanTexPart && (cleanTexPart.includes(cleanMPart) || cleanMPart.includes(cleanTexPart))) ||
-                     cleanTexName.includes(cleanM) || cleanM.includes(cleanTexName);
-            });
-          }
-
-          // Fallback: if only one material, everything matches it
+          // Absolute Fallback: if only one material, match it
           if (!targetMat && sortedMaterials.length === 1) {
             targetMat = sortedMaterials[0];
           }
@@ -918,6 +990,23 @@ const App: React.FC = () => {
         });
 
         newSettings.colorVariants = Object.values(variantsMap);
+
+        // Ensure the active variant's mappings are applied to the active settings on initialization
+        if (newSettings.activeVariant) {
+          const activeVar = variantsMap[newSettings.activeVariant];
+          if (activeVar) {
+            newSettings.materialMappings = { ...newSettings.materialMappings, ...activeVar.mappings };
+            if (activeVar.normalMappings) newSettings.normalMappings = { ...newSettings.normalMappings, ...activeVar.normalMappings };
+            if (activeVar.metalMappings) newSettings.metalMappings = { ...newSettings.metalMappings, ...activeVar.metalMappings };
+            if (activeVar.roughMappings) newSettings.roughMappings = { ...newSettings.roughMappings, ...activeVar.roughMappings };
+            if (activeVar.alphaMappings) newSettings.alphaMappings = { ...newSettings.alphaMappings, ...activeVar.alphaMappings };
+            if (activeVar.emissiveMappings) newSettings.emissiveMappings = { ...newSettings.emissiveMappings, ...activeVar.emissiveMappings };
+            if (activeVar.aoMappings) newSettings.aoMappings = { ...newSettings.aoMappings, ...activeVar.aoMappings };
+            if (activeVar.heightMappings) newSettings.heightMappings = { ...newSettings.heightMappings, ...activeVar.heightMappings };
+            if (activeVar.specularMappings) newSettings.specularMappings = { ...newSettings.specularMappings, ...activeVar.specularMappings };
+          }
+        }
+
         return { ...model, settings: newSettings, detectedMaterials: materials };
       }));
     } catch (error) {
@@ -1210,6 +1299,24 @@ const App: React.FC = () => {
                 )}
               </button>
 
+              {/* FlipY UV Mapping Toggle Option */}
+              {selectedId && (() => {
+                const selModel = models.find(m => m.id === selectedId);
+                if (!selModel) return null;
+                const isFlippedY = selModel.settings.flipY !== false; // default true
+                return (
+                  <button
+                    onClick={() => updateModelSettings(selectedId, { flipY: !isFlippedY })}
+                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-black/5 flex items-center justify-center transition-all group ${!isFlippedY ? 'bg-zinc-800 text-yellow-500 border-zinc-700' : 'bg-white text-zinc-400 hover:text-zinc-800'}`}
+                    title={t.flipY}
+                  >
+                    <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+                    </svg>
+                  </button>
+                );
+              })()}
+
               {/* Language Selector */}
               <div className="flex flex-col gap-1 bg-zinc-50 p-1 rounded-xl border border-black/5">
                 {(['en', 'he', 'ar', 'ru'] as Language[]).map((lang) => (
@@ -1243,13 +1350,16 @@ const App: React.FC = () => {
       <div className={`absolute inset-0 z-10 transition-colors duration-1000 ${isNightMode ? 'bg-zinc-800/50' : 'bg-transparent'}`}>
         <Canvas 
           shadows 
-          dpr={[1, 2]} 
+          dpr={isMobile ? 1 : [1, 1.5]} 
           gl={{ 
             antialias: true, 
             alpha: true,
             sortObjects: true,
-            logarithmicDepthBuffer: true
+            logarithmicDepthBuffer: false
           }} 
+          onCreated={({ gl }) => {
+            gl.debug.checkShaderErrors = false;
+          }}
           className="relative z-20"
           style={{ background: 'transparent' }}
           onPointerDown={() => { if (isMoveMode) setIsMoveMode(false); setTargetView(null); setActivePart(null); stopSpeaking(); }}
@@ -1499,6 +1609,10 @@ const App: React.FC = () => {
                                 const meshMatchTarget = part.partName || part.partKey || part.id;
                                 const isHovered = hoveredPartId === meshMatchTarget;
                                 
+                                // Filter catalogTextures to only those belonging to the currently selected model to prevent across-model mixups
+                                const selectedModelName = selectedModel?.name || '';
+                                const modelSpecificTextures = catalogTextures.filter(t => isModelTextureMatch(t.name, selectedModelName));
+                                
                                 // Find the matching model file
                                 const partNameForMatch = part.partName.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
                                 const partKeyForMatch = (part.partKey || '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
@@ -1511,10 +1625,11 @@ const App: React.FC = () => {
                                 let partThumbnailUrl = '';
                                 if (match) {
                                   const modelBaseName = match.name.replace(/\.fbx$/i, '').toLowerCase();
-                                  const matchedTex = catalogTextures.find(t => {
+
+                                  const matchedTex = modelSpecificTextures.find(t => {
                                     const lowTex = t.name.toLowerCase();
                                     return lowTex.startsWith(modelBaseName) && lowTex.includes('preview');
-                                  }) || catalogTextures.find(t => t.name.toLowerCase().startsWith(modelBaseName));
+                                  }) || modelSpecificTextures.find(t => t.name.toLowerCase().startsWith(modelBaseName));
                                   if (matchedTex) {
                                     partThumbnailUrl = matchedTex.url;
                                   }
@@ -1524,10 +1639,10 @@ const App: React.FC = () => {
                                 if (!partThumbnailUrl) {
                                   const pName = part.partName.toLowerCase();
                                   const pKey = (part.partKey || '').toLowerCase();
-                                  const directTex = catalogTextures.find(t => {
+                                  const directTex = modelSpecificTextures.find(t => {
                                     const lowTex = t.name.toLowerCase();
                                     return (lowTex.startsWith(pName) || lowTex.startsWith(pKey)) && lowTex.includes('preview');
-                                  }) || catalogTextures.find(t => {
+                                  }) || modelSpecificTextures.find(t => {
                                     const lowTex = t.name.toLowerCase();
                                     return lowTex.startsWith(pName) || lowTex.startsWith(pKey);
                                   });

@@ -39,9 +39,38 @@ function resolveBestSet(
   matName: string,
   sets: TextureSet[]
 ): TextureSet | null {
-  // Score: 3 = exact match, 2 = substring, 1 = wildcard fallback, 0 = no match
+  // Score: 4 = exact match, 3.5+ = semantic/word match, 3 = substring, 2 = wildcard fallback, 1 = custom fallback, 0 = no match
   let best: TextureSet | null = null;
   let bestScore = 0;
+
+  const normalizeWord = (w: string) => {
+    let s = w.toLowerCase().trim();
+    if (s.startsWith('p')) {
+      if (s.startsWith('pgolden')) s = s.slice(1); // golden
+      else if (s.startsWith('pgold')) s = s.slice(1); // gold
+      else if (s.startsWith('psilvers')) s = s.slice(1); // silvers
+      else if (s.startsWith('psilver')) s = s.slice(1); // silver
+      else if (s.startsWith('pwooden')) s = s.slice(1); // wooden
+      else if (s.startsWith('pblue')) s = s.slice(1); // blue
+    }
+    s = s
+      .replace(/golden/g, 'gold')
+      .replace(/silvers/g, 'silver')
+      .replace(/wooden/g, 'wood')
+      .replace(/handel/g, 'handle')
+      .replace(/middel/g, 'middle')
+      .replace(/colour/g, 'color');
+    return s;
+  };
+
+  const getNormalizedWords = (name: string) => {
+    const rawWords = name
+      .replace(/([a-z])([A-Z])/g, '$1_$2') // Split camelCase
+      .split(/[\s\-_.]+/)
+      .map(w => w.trim().toLowerCase())
+      .filter(w => w !== '' && !/^\d+$/.test(w)); // omit digits
+    return rawWords.map(normalizeWord);
+  };
 
   for (const set of sets) {
     if (!set.targets || set.targets.length === 0) {
@@ -51,13 +80,52 @@ function resolveBestSet(
     }
     for (const candidate of [meshName, matName]) {
       const c = candidate.toLowerCase().trim();
+      const cNoDigits = c.replace(/\d+/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+
       for (const pattern of set.targets) {
         const p = pattern.toLowerCase().trim();
+        const pNoDigits = p.replace(/\d+/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+
         let score = 0;
-        if (c === p) score = 4;
-        else if (!p.includes('*') && (c.includes(p) || p.includes(c))) score = 3; 
-        else if (p.includes('*') && matchesAny(c, [p])) score = 2;
-        else if (p === '*') score = 1;
+        if (c === p || (cNoDigits && pNoDigits && cNoDigits === pNoDigits)) {
+          score = 4;
+        } else if (!p.includes('*') && (c.includes(p) || p.includes(c) || (cNoDigits && pNoDigits && (cNoDigits.includes(pNoDigits) || pNoDigits.includes(cNoDigits))))) {
+          const matchLen = p.length;
+          const wordBoundaryReward = c.includes(`_${p}`) || c.includes(`${p}_`) ? 0.2 : 0;
+          score = 3 + (matchLen / 100) + wordBoundaryReward;
+        } else if (p.includes('*') && (matchesAny(c, [p]) || (cNoDigits && pNoDigits && matchesAny(cNoDigits, [pNoDigits])))) {
+          score = 2;
+        } else if (p === '*') {
+          score = 1;
+        }
+
+        // ── Robust Word Overlap Fallback ──────────────────────────────────────
+        const cWords = getNormalizedWords(candidate);
+        const pWords = getNormalizedWords(pattern);
+        
+        if (cWords.length > 0 && pWords.length > 0) {
+          let overlapCount = 0;
+          for (const cw of cWords) {
+            if (pWords.includes(cw)) overlapCount++;
+          }
+          
+          if (overlapCount > 0) {
+            const overlapRatio = overlapCount / Math.max(cWords.length, 1);
+            const patternRatio = overlapCount / Math.max(pWords.length, 1);
+            
+            if (overlapRatio === 1 || patternRatio === 1) {
+              const overlapScore = 3.5 + (overlapCount / 20) + (overlapRatio * 0.1);
+              if (overlapScore > score) {
+                score = overlapScore;
+              }
+            } else if (overlapCount >= 2) {
+              const overlapScore = 3.1 + (overlapCount / 20) + (overlapRatio * 0.1);
+              if (overlapScore > score) {
+                score = overlapScore;
+              }
+            }
+          }
+        }
 
         if (score > bestScore) {
           bestScore = score;
@@ -231,19 +299,139 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
     toLoad.forEach(({ url: u, isColor }) => {
       const lo = u.toLowerCase();
-      let loader: any = textureLoader.current;
-      if (lo.endsWith('.tga')) loader = tgaLoader.current;
-      else if (lo.endsWith('.dds')) loader = ddsLoader.current;
-      loader.load(u, (tex: THREE.Texture) => {
-        tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-        tex.needsUpdate = true;
-        textureCacheRef.current[u] = tex;
-        setTextureCache(prev => ({ ...prev, [u]: tex }));
-      }, undefined, (err: any) => console.error(`[FBXModel] ❌ Failed: "${u}"`, err));
+      if (lo.endsWith('.tga') || lo.endsWith('.dds')) {
+        let loader: any = lo.endsWith('.tga') ? tgaLoader.current : ddsLoader.current;
+        loader.load(u, (tex: THREE.Texture) => {
+          tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+          tex.wrapS = THREE.RepeatWrapping;
+          tex.wrapT = THREE.RepeatWrapping;
+          const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+          tex.flipY = shouldFlipY;
+          tex.needsUpdate = true;
+          textureCacheRef.current[u] = tex;
+          setTextureCache(prev => ({ ...prev, [u]: tex }));
+        }, undefined, (err: any) => console.error(`[FBXModel] ❌ Failed: "${u}"`, err));
+      } else {
+        // Optimized standard image loader with smart Canvas downscaling to prevent GPU Out Of Memory and WebGL context loss
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.referrerPolicy = 'no-referrer';
+        img.src = u;
+        img.onload = () => {
+          try {
+            // Cap max size to 1024 to dramatically reduce VRAM usage (16x memory reduction per texture!)
+            const maxDim = 1024;
+            let w = img.width;
+            let h = img.height;
+            let finalSource: HTMLImageElement | HTMLCanvasElement = img;
+
+            if (w > maxDim || h > maxDim) {
+              const ratio = Math.min(maxDim / w, maxDim / h);
+              w = Math.round(w * ratio);
+              h = Math.round(h * ratio);
+
+              const canvas = document.createElement('canvas');
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(img, 0, 0, w, h);
+                finalSource = canvas;
+                console.log(`[TextureOptimizer] Downscaled ${u} from ${img.width}x${img.height} to ${w}x${h}`);
+              }
+            }
+
+            const tex = new THREE.Texture(finalSource);
+            tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+            tex.flipY = shouldFlipY;
+            tex.needsUpdate = true;
+
+            textureCacheRef.current[u] = tex;
+            setTextureCache(prev => ({ ...prev, [u]: tex }));
+          } catch (e) {
+            console.error('[TextureOptimizer] Error processing texture canvas downscaling, falling back:', e);
+            // Fallback load
+            const fallbackLoader = new THREE.TextureLoader();
+            fallbackLoader.load(u, (tex) => {
+              tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+              tex.wrapS = THREE.RepeatWrapping;
+              tex.wrapT = THREE.RepeatWrapping;
+              const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+              tex.flipY = shouldFlipY;
+              tex.needsUpdate = true;
+              textureCacheRef.current[u] = tex;
+              setTextureCache(prev => ({ ...prev, [u]: tex }));
+            }, undefined, (err) => console.error(`[FBXModel] ❌ Fallback failed: "${u}"`, err));
+          }
+        };
+        img.onerror = (err) => {
+          console.error(`[TextureOptimizer] Image load error for ${u}. Trying legacy loader as fallback:`, err);
+          const fallbackLoader = new THREE.TextureLoader();
+          fallbackLoader.load(u, (tex) => {
+            tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+            tex.flipY = shouldFlipY;
+            tex.needsUpdate = true;
+            textureCacheRef.current[u] = tex;
+            setTextureCache(prev => ({ ...prev, [u]: tex }));
+          }, undefined, (fallbackErr) => console.error(`[FBXModel] ❌ Fallback failed too: "${u}"`, fallbackErr));
+        };
+      }
     });
   }, [textureSets, settings]);
 
   useEffect(() => { textureCacheRef.current = textureCache; }, [textureCache]);
+
+  // Clean up and dispose all loaded textures on unmount to prevent GPU memory leaks and WebGL context crashes
+  useEffect(() => {
+    return () => {
+      console.log("[FBXModel] 🧹 Disposing cached textures to free GPU memory...");
+      const cache = textureCacheRef.current;
+      if (cache) {
+        Object.values(cache).forEach((tex) => {
+          if (tex && typeof tex.dispose === 'function') {
+            try {
+              tex.dispose();
+            } catch (e) {
+              console.warn("[FBXModel] Error disposing texture:", e);
+            }
+          }
+        });
+      }
+      textureCacheRef.current = {};
+    };
+  }, []);
+
+  // Synchronize flipY setting changes to all cached textures immediately
+  useEffect(() => {
+    const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+    let updated = false;
+    Object.values(textureCache).forEach((tex) => {
+      if (tex.flipY !== shouldFlipY) {
+        tex.flipY = shouldFlipY;
+        tex.needsUpdate = true;
+        updated = true;
+      }
+    });
+    if (updated && fbx) {
+      fbx.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mesh = child as THREE.Mesh;
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          materials.forEach((mat) => {
+            if (mat instanceof THREE.MeshStandardMaterial) {
+              mat.needsUpdate = true;
+            }
+          });
+        }
+      });
+    }
+  }, [settings.flipY, textureCache, fbx]);
 
   // ── Animation control ────────────────────────────────────────────────────
   useEffect(() => {
@@ -333,39 +521,58 @@ const FBXModel: React.FC<FBXModelProps> = ({
         const tex = (url: string | undefined) => (url ? textureCache[url] : undefined);
 
         // ── 3. Base color / albedo ─────────────────────────────────────────
-        // textureSets takes priority over legacy materialMappings
-        const baseColorTex = tex(set?.baseColor) ?? tex(settings.materialMappings?.[mat.name]);
-        if (baseColorTex) { mat.map = baseColorTex; mat.color.set(0xffffff); }
-        else { mat.map = mat.userData.originalMap || null; mat.color.copy(mat.userData.originalColor || new THREE.Color(0xffffff)); }
+        const baseColorTex = tex(settings.materialMappings?.[mat.name]) ?? tex(set?.baseColor);
+        if (baseColorTex) { 
+          mat.map = baseColorTex; 
+          mat.color.set(0xffffff); 
+        } else { 
+          mat.map = mat.userData.originalMap || null; 
+          mat.color.copy(mat.userData.originalColor || new THREE.Color(0xffffff)); 
+        }
 
         // ── 4. Normal ──────────────────────────────────────────────────────
-        const normalTex = tex(set?.normal) ?? tex(settings.normalMappings?.[mat.name]);
-        if (normalTex) { mat.normalMap = normalTex; mat.normalScale.set(1, 1); }
+        const normalTex = tex(settings.normalMappings?.[mat.name]) ?? tex(set?.normal);
+        mat.normalMap = normalTex || null;
+        if (normalTex) { 
+          mat.normalScale.set(1, 1); 
+        }
 
         // ── 5. Metalness ───────────────────────────────────────────────────
-        const metalTex = tex(set?.metalness) ?? tex(settings.metalMappings?.[mat.name]);
-        if (metalTex) mat.metalnessMap = metalTex;
+        const metalTex = tex(settings.metalMappings?.[mat.name]) ?? tex(set?.metalness);
+        mat.metalnessMap = metalTex || null;
 
         // ── 6. Roughness ───────────────────────────────────────────────────
-        const roughTex = tex(set?.roughness) ?? tex(settings.roughMappings?.[mat.name]);
-        if (roughTex) mat.roughnessMap = roughTex;
+        const roughTex = tex(settings.roughMappings?.[mat.name]) ?? tex(set?.roughness);
+        mat.roughnessMap = roughTex || null;
 
         // ── 7. Alpha ───────────────────────────────────────────────────────
-        const alphaTex = tex(set?.alpha) ?? tex(settings.alphaMappings?.[mat.name]);
-        if (alphaTex) mat.alphaMap = alphaTex;
-        else mat.alphaMap = mat.userData.originalAlphaMap || null;
+        const alphaTex = tex(settings.alphaMappings?.[mat.name]) ?? tex(set?.alpha);
+        mat.alphaMap = alphaTex || mat.userData.originalAlphaMap || null;
 
         // ── 8. Emissive ────────────────────────────────────────────────────
-        const emissiveTex = tex(set?.emissive) ?? tex(settings.emissiveMappings?.[mat.name]);
-        if (emissiveTex) { mat.emissiveMap = emissiveTex; mat.emissive.set(0xffffff); mat.emissiveIntensity = settings.emissiveIntensity || 1.0; }
+        const emissiveTex = tex(settings.emissiveMappings?.[mat.name]) ?? tex(set?.emissive);
+        mat.emissiveMap = emissiveTex || null;
+        if (emissiveTex) { 
+          mat.emissive.set(0xffffff); 
+          mat.emissiveIntensity = settings.emissiveIntensity || 1.0; 
+        }
 
         // ── 9. AO ──────────────────────────────────────────────────────────
-        const aoTex = tex(set?.ao) ?? tex(settings.aoMappings?.[mat.name]);
-        if (aoTex) { mat.aoMap = aoTex; mat.aoMapIntensity = 1.0; }
+        const aoTex = tex(settings.aoMappings?.[mat.name]) ?? tex(set?.ao);
+        mat.aoMap = aoTex || null;
+        if (aoTex) { 
+          mat.aoMapIntensity = 1.0; 
+          if (mesh.geometry && (!mesh.geometry.attributes || !mesh.geometry.attributes.uv2)) {
+            aoTex.channel = 0;
+          }
+        }
 
         // ── 10. Height / displacement ──────────────────────────────────────
-        const heightTex = tex(set?.height) ?? tex(settings.heightMappings?.[mat.name]);
-        if (heightTex) { mat.displacementMap = heightTex; mat.displacementScale = 0.1; }
+        const heightTex = tex(settings.heightMappings?.[mat.name]) ?? tex(set?.height);
+        mat.displacementMap = heightTex || null;
+        if (heightTex) { 
+          mat.displacementScale = 0.1; 
+        }
 
         // ── 11. PBR scalars ────────────────────────────────────────────────
         mat.metalness = mat.metalnessMap ? 1.0 : settings.metalness;

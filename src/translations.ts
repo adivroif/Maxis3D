@@ -36,6 +36,7 @@ export interface Translations {
   labelPartDescription: string;
   inStock: string;
   inStockCount: string;
+  flipY: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -74,6 +75,7 @@ export const translations: Record<Language, Translations> = {
     labelPartDescription: "Description",
     inStock: "In Stock",
     inStockCount: "Qty",
+    flipY: "Flip UV (Y-Axis)",
   },
   he: {
     all: "הכל",
@@ -110,6 +112,7 @@ export const translations: Record<Language, Translations> = {
     labelPartDescription: "תיאור",
     inStock: "במלאי",
     inStockCount: "כמות",
+    flipY: "היפוך ציר Y של הטקסטורה (UV)",
   },
   ar: {
     all: "الكل",
@@ -146,6 +149,7 @@ export const translations: Record<Language, Translations> = {
     labelPartDescription: "وصف",
     inStock: "في المخزن",
     inStockCount: "الكمية",
+    flipY: "عكس الـ UV (محور Y)",
   },
   ru: {
     all: "Все",
@@ -182,5 +186,6 @@ export const translations: Record<Language, Translations> = {
     labelPartDescription: "Описание",
     inStock: "В наличии",
     inStockCount: "Кол-во",
+    flipY: "Зеркально UV (ось Y)",
   },
 };

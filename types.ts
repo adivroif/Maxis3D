@@ -54,6 +54,7 @@ export interface MaterialSettings {
   colorVariants: ColorVariant[];
   activeVariant: string | null;
   targetPartId?: string | null;
+  flipY?: boolean;
 }
 
 export interface MaterialMetadata {
