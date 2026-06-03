@@ -102,6 +102,10 @@ const App: React.FC = () => {
   const [translatedSelectedModelName, setTranslatedSelectedModelName] = useState<string>('');
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768);
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' } | null>(null);
+  const [uvLayoutSvg, setUvLayoutSvg] = useState<string>('');
+  const [uvLayoutFilename, setUvLayoutFilename] = useState<string>('');
+  const [partUVMaps, setPartUVMaps] = useState<Record<string, { svg: string; filename: string }>>({});
+  const [inspectedUVPart, setInspectedUVPart] = useState<{ name: string; svg: string; filename: string } | null>(null);
   const t = translations[language];
 
   useEffect(() => {
@@ -780,12 +784,32 @@ const App: React.FC = () => {
           let targetMat = null;
           let bestScore = -1;
 
+          const normalizeWord = (w: string) => {
+            let s = w.toLowerCase().trim();
+            if (s.startsWith('p')) {
+              if (s.startsWith('pgolden')) s = s.slice(1);
+              else if (s.startsWith('pgold')) s = s.slice(1);
+              else if (s.startsWith('psilvers')) s = s.slice(1);
+              else if (s.startsWith('psilver')) s = s.slice(1);
+              else if (s.startsWith('pwooden')) s = s.slice(1);
+              else if (s.startsWith('pblue')) s = s.slice(1);
+            }
+            return s
+              .replace(/golden/g, 'gold')
+              .replace(/silvers/g, 'silver')
+              .replace(/wooden/g, 'wood')
+              .replace(/handel/g, 'handle')
+              .replace(/middel/g, 'middle')
+              .replace(/colour/g, 'color');
+          };
+
           const colorWords = [...colorNames, 'golden', 'silver', 'blue', 'gray', 'grey', 'yellow', 'wooden', 'wood', 'steel', 'metal', 'psilver', 'pblue', 'pgold', 'pgolden', 'pwooden'];
 
           // Clean texture tokens - de-duplicate to avoid double matching single words
           const texTokens = Array.from(new Set(
             texNameNoExt
               .split(/[\s_.-]+/)
+              .map((t: string) => normalizeWord(t))
               .filter((t: string) => t && t !== cleanModelName && t !== 'png')
           )) as string[];
           const texTokensNoColor: string[] = texTokens.filter((t: string) => !colorWords.includes(t));
@@ -795,6 +819,7 @@ const App: React.FC = () => {
             const matTokens = Array.from(new Set(
               mat.toLowerCase()
                 .split(/[\s_.-]+/)
+                .map((t: string) => normalizeWord(t))
                 .filter((t: string) => t && t !== cleanModelName)
             )) as string[];
             const matTokensNoColor: string[] = matTokens.filter((t: string) => !colorWords.includes(t));
@@ -827,6 +852,32 @@ const App: React.FC = () => {
               densityBonus = density * 150; 
             }
             score += structuralMatches + densityBonus;
+
+            // 2.5 Smart Agnostic Part-Matching (handles filtered-out model name edge cases)
+            const mapTypeKeywords = [
+              'basecolor', 'diffuse', 'albedo', 'color', 'bc', 'albedom', 'base_color', 'diffuse_color',
+              'normal', 'nor', 'nrm', 'bump', 'height', 'displacement', 'disp',
+              'metal', 'metallic', 'metalness', 'met', 'rough', 'roughness', 'rog', 'rough_metal', 'metalrough', 'orm',
+              'alpha', 'opacity', 'trans', 'mask', 'emissive', 'glow', 'selfillum',
+              'ao', 'occlusion', 'ambient', 'specular', 'spec'
+            ];
+            
+            let cleanAgnosticTexName = cleanTexName;
+            mapTypeKeywords.forEach(kw => {
+              cleanAgnosticTexName = cleanAgnosticTexName.replace(kw, '');
+            });
+            cleanAgnosticTexName = cleanAgnosticTexName.replace(/_+/g, '');
+
+            const agnosticM = cleanM.replace(cleanModelName, '');
+            const agnosticT = cleanAgnosticTexName.replace(cleanModelName, '');
+
+            if (cleanM === cleanAgnosticTexName) {
+              score += 800;
+            } else if (agnosticM && agnosticT && agnosticM === agnosticT) {
+              score += 600;
+            } else if (cleanAgnosticTexName && cleanM && (cleanAgnosticTexName.includes(cleanM) || cleanM.includes(cleanAgnosticTexName))) {
+              score += 200;
+            }
 
             // 3. Color matchmaking
             const texColors = texTokens.filter((t: string) => colorWords.includes(t));
@@ -923,70 +974,94 @@ const App: React.FC = () => {
           matchesByType[type].push(m);
         });
 
-        Object.entries(matchesByType).forEach(([type, matches]) => {
-          // If there's only one texture of this type for the whole model, 
-          // apply it to ALL materials (Global Mapping)
-          if (matches.length === 1 && !matches[0].colorName) {
-            const m = matches[0];
-            sortedMaterials.forEach(matName => {
-              if (type === 'base') newSettings.materialMappings[matName] = m.tex.url;
-              else if (type === 'normal') newSettings.normalMappings[matName] = m.tex.url;
-              else if (type === 'metal') newSettings.metalMappings[matName] = m.tex.url;
-              else if (type === 'rough') newSettings.roughMappings[matName] = m.tex.url;
-              else if (type === 'alpha') newSettings.alphaMappings[matName] = m.tex.url;
-              else if (type === 'emissive') newSettings.emissiveMappings[matName] = m.tex.url;
-              else if (type === 'ao') newSettings.aoMappings[matName] = m.tex.url;
-              else if (type === 'height') newSettings.heightMappings[matName] = m.tex.url;
-              else if (type === 'specular') newSettings.specularMappings[matName] = m.tex.url;
-            });
+        // helper to check if a mapping exists for a material + type (either global or in variant)
+        const hasExistingMapping = (mat: string, type: string, colorName: string | null) => {
+          const isVariant = colorName && actualVariants.has(colorName);
+          if (isVariant) {
+            const v = variantsMap[colorName!];
+            if (!v) return false;
+            if (type === 'base') return !!v.mappings[mat];
+            if (type === 'normal') return !!v.normalMappings?.[mat];
+            if (type === 'metal') return !!v.metalMappings?.[mat];
+            if (type === 'rough') return !!v.roughMappings?.[mat];
+            if (type === 'alpha') return !!v.alphaMappings?.[mat];
+            if (type === 'emissive') return !!v.emissiveMappings?.[mat];
+            if (type === 'ao') return !!v.aoMappings?.[mat];
+            if (type === 'height') return !!v.heightMappings?.[mat];
+            if (type === 'specular') return !!v.specularMappings?.[mat];
+            return false;
           } else {
-            // If there are multiple, use the specific matching logic
-            matches.forEach((data: any) => {
-              const { tex, targetMat, colorName } = data;
-              
-              const isVariant = colorName && actualVariants.has(colorName);
-              const targetMaterials = targetMat ? [targetMat] : sortedMaterials;
+            if (type === 'base') return !!newSettings.materialMappings[mat];
+            if (type === 'normal') return !!newSettings.normalMappings[mat];
+            if (type === 'metal') return !!newSettings.metalMappings[mat];
+            if (type === 'rough') return !!newSettings.roughMappings[mat];
+            if (type === 'alpha') return !!newSettings.alphaMappings[mat];
+            if (type === 'emissive') return !!newSettings.emissiveMappings[mat];
+            if (type === 'ao') return !!newSettings.aoMappings[mat];
+            if (type === 'height') return !!newSettings.heightMappings[mat];
+            if (type === 'specular') return !!newSettings.specularMappings[mat];
+            return false;
+          }
+        };
 
-              if (isVariant) {
-                if (!variantsMap[colorName]) {
-                  variantsMap[colorName] = { 
-                    name: colorName, mappings: {}, normalMappings: {}, metalMappings: {}, roughMappings: {}, 
-                    alphaMappings: {}, emissiveMappings: {}, aoMappings: {}, heightMappings: {}, specularMappings: {} 
-                  };
-                }
-                
-                targetMaterials.forEach(mat => {
-                  if (type === 'base') {
-                    variantsMap[colorName].mappings[mat] = tex.url;
-                    if (!newSettings.materialMappings[mat]) {
-                      newSettings.materialMappings[mat] = tex.url;
-                      newSettings.activeVariant = colorName;
-                    }
-                  } 
-                  else if (type === 'normal') variantsMap[colorName].normalMappings![mat] = tex.url;
-                  else if (type === 'metal') variantsMap[colorName].metalMappings![mat] = tex.url;
-                  else if (type === 'rough') variantsMap[colorName].roughMappings![mat] = tex.url;
-                  else if (type === 'alpha') variantsMap[colorName].alphaMappings![mat] = tex.url;
-                  else if (type === 'emissive') variantsMap[colorName].emissiveMappings![mat] = tex.url;
-                  else if (type === 'ao') variantsMap[colorName].aoMappings![mat] = tex.url;
-                  else if (type === 'height') variantsMap[colorName].heightMappings![mat] = tex.url;
-                  else if (type === 'specular') variantsMap[colorName].specularMappings![mat] = tex.url;
-                });
-              } else {
-                targetMaterials.forEach(mat => {
-                  if (type === 'base') newSettings.materialMappings[mat] = tex.url;
-                  else if (type === 'normal') newSettings.normalMappings[mat] = tex.url;
-                  else if (type === 'metal') newSettings.metalMappings[mat] = tex.url;
-                  else if (type === 'rough') newSettings.roughMappings[mat] = tex.url;
-                  else if (type === 'alpha') newSettings.alphaMappings[mat] = tex.url;
-                  else if (type === 'emissive') newSettings.emissiveMappings[mat] = tex.url;
-                  else if (type === 'ao') newSettings.aoMappings[mat] = tex.url;
-                  else if (type === 'height') newSettings.heightMappings[mat] = tex.url;
-                  else if (type === 'specular') newSettings.specularMappings[mat] = tex.url;
-                });
+        const setMapping = (mat: string, type: string, url: string, colorName: string | null) => {
+          const isVariant = colorName && actualVariants.has(colorName);
+          if (isVariant) {
+            if (!variantsMap[colorName!]) {
+              variantsMap[colorName!] = { 
+                name: colorName!, mappings: {}, normalMappings: {}, metalMappings: {}, roughMappings: {}, 
+                alphaMappings: {}, emissiveMappings: {}, aoMappings: {}, heightMappings: {}, specularMappings: {} 
+              };
+            }
+            const v = variantsMap[colorName!];
+            if (type === 'base') {
+              v.mappings[mat] = url;
+              if (!newSettings.materialMappings[mat]) {
+                newSettings.materialMappings[mat] = url;
+                newSettings.activeVariant = colorName!;
+              }
+            } 
+            else if (type === 'normal') { if (!v.normalMappings) v.normalMappings = {}; v.normalMappings[mat] = url; }
+            else if (type === 'metal') { if (!v.metalMappings) v.metalMappings = {}; v.metalMappings[mat] = url; }
+            else if (type === 'rough') { if (!v.roughMappings) v.roughMappings = {}; v.roughMappings[mat] = url; }
+            else if (type === 'alpha') { if (!v.alphaMappings) v.alphaMappings = {}; v.alphaMappings[mat] = url; }
+            else if (type === 'emissive') { if (!v.emissiveMappings) v.emissiveMappings = {}; v.emissiveMappings[mat] = url; }
+            else if (type === 'ao') { if (!v.aoMappings) v.aoMappings = {}; v.aoMappings[mat] = url; }
+            else if (type === 'height') { if (!v.heightMappings) v.heightMappings = {}; v.heightMappings[mat] = url; }
+            else if (type === 'specular') { if (!v.specularMappings) v.specularMappings = {}; v.specularMappings[mat] = url; }
+          } else {
+            if (type === 'base') newSettings.materialMappings[mat] = url;
+            else if (type === 'normal') newSettings.normalMappings[mat] = url;
+            else if (type === 'metal') newSettings.metalMappings[mat] = url;
+            else if (type === 'rough') newSettings.roughMappings[mat] = url;
+            else if (type === 'alpha') newSettings.alphaMappings[mat] = url;
+            else if (type === 'emissive') newSettings.emissiveMappings[mat] = url;
+            else if (type === 'ao') newSettings.aoMappings[mat] = url;
+            else if (type === 'height') newSettings.heightMappings[mat] = url;
+            else if (type === 'specular') newSettings.specularMappings[mat] = url;
+          }
+        };
+
+        Object.entries(matchesByType).forEach(([type, matches]) => {
+          // 1. Separate matches into SPECIFIC parts vs GLOBAL fallbacks
+          const specificMatches = matches.filter(m => m.targetMat !== null);
+          const globalMatches = matches.filter(m => m.targetMat === null);
+
+          // 2. Apply all SPECIFIC matches first (so they take precedence and block global overrides!)
+          specificMatches.forEach((m: any) => {
+            const { tex, targetMat, colorName } = m;
+            setMapping(targetMat, type, tex.url, colorName);
+          });
+
+          // 3. Apply GLOBAL matches to any materials that don't have a mapping yet for this type
+          globalMatches.forEach((m: any) => {
+            const { tex, colorName } = m;
+            sortedMaterials.forEach((matName) => {
+              if (!hasExistingMapping(matName, type, colorName)) {
+                setMapping(matName, type, tex.url, colorName);
               }
             });
-          }
+          });
         });
 
         newSettings.colorVariants = Object.values(variantsMap);
@@ -1317,6 +1392,34 @@ const App: React.FC = () => {
                 );
               })()}
 
+              {/* Export/Download UV Map Button */}
+              {selectedId && uvLayoutSvg && (
+                <button
+                  onClick={() => {
+                    const blob = new Blob([uvLayoutSvg], { type: 'image/svg+xml;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = uvLayoutFilename || 'axe_uv_layout.svg';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    setToast({
+                      message: language === 'he' ? 'מפת ה-UV הורדה בהצלחה!' : 'UV map downloaded successfully!',
+                      type: 'success'
+                    });
+                  }}
+                  className="w-10 h-10 sm:w-12 sm:h-12 bg-white hover:bg-emerald-50 rounded-xl border border-black/5 flex items-center justify-center transition-all group text-emerald-500 hover:text-emerald-700"
+                  title={language === 'he' ? 'הורד מפת UV (וקטור SVG)' : 'Download UV Map (Vector SVG)'}
+                >
+                  <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 4v16M15 4v16M4 9h16M4 15h16" />
+                  </svg>
+                </button>
+              )}
+
               {/* Language Selector */}
               <div className="flex flex-col gap-1 bg-zinc-50 p-1 rounded-xl border border-black/5">
                 {(['en', 'he', 'ar', 'ru'] as Language[]).map((lang) => (
@@ -1412,6 +1515,16 @@ const App: React.FC = () => {
                   translatedParts={translatedParts}
                   isMobile={isMobile}
                   hoveredPartId={hoveredPartId}
+                  onUVLayoutGenerated={(svg, filename) => {
+                    setUvLayoutSvg(svg);
+                    setUvLayoutFilename(filename);
+                  }}
+                  onPartUVLayoutGenerated={(meshName, svg, filename) => {
+                    setPartUVMaps(prev => ({
+                      ...prev,
+                      [meshName]: { svg, filename }
+                    }));
+                  }}
               />
               </group>
             ))}
@@ -1788,7 +1901,7 @@ const App: React.FC = () => {
 
         {/* BOTTOM LEFT DESCRIPTION BOX */}
         {activePart && (
-          <div className={`absolute bottom-24 sm:bottom-6 left-6 z-50 w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 bg-white/90 backdrop-blur-2xl rounded-[2rem] shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 max-h-[40vh] flex flex-col`} dir={isRTL ? 'rtl' : 'ltr'}>
+          <div className={`absolute bottom-24 sm:bottom-6 left-6 z-50 w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 bg-white/95 backdrop-blur-2xl rounded-[2rem] shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 max-h-[70vh] flex flex-col`} dir={isRTL ? 'rtl' : 'ltr'}>
             <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0">
               <div className="flex flex-col">
                 <span className="text-[8px] font-black uppercase tracking-[0.3em] text-blue-600 leading-none mb-1">{t.partDetails}</span>
@@ -1809,10 +1922,79 @@ const App: React.FC = () => {
               </button>
             </div>
             <div className="h-[1px] w-full bg-zinc-100 mb-3 sm:mb-4 shrink-0"></div>
-            <div className="overflow-y-auto pr-2 no-scrollbar">
+            <div className="overflow-y-auto pr-2 no-scrollbar flex-1">
               <p className="text-xs sm:text-sm text-zinc-600 leading-relaxed font-medium">
                 {activePart.description || t.noDescription}
               </p>
+              
+              {activePart.mesh?.name && partUVMaps[activePart.mesh.name] && (() => {
+                const uvData = partUVMaps[activePart.mesh.name];
+                const labels = {
+                  en: { inspect: "Inspect UV Map", download: "Download UV" },
+                  he: { inspect: "הצג מפת UV", download: "הורד מפת UV" },
+                  ar: { inspect: "معاينة UV", download: "تحميل UV" },
+                  ru: { inspect: "Посмотреть UV", download: "Скачать UV" }
+                }[language] || { inspect: "Inspect UV Map", download: "Download UV" };
+
+                return (
+                  <div className="mt-4 pt-3 border-t border-zinc-100 flex flex-col gap-2 shrink-0">
+                    <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-400">UV WIREFRAME GRID</span>
+                    
+                    {/* Micro UV Inline Vector SVG Render Map */}
+                    <div 
+                      onClick={() => setInspectedUVPart({ name: activePart.name, svg: uvData.svg, filename: uvData.filename })}
+                      className="w-full h-24 bg-stone-950 border border-zinc-200/50 rounded-xl overflow-hidden relative cursor-pointer group hover:border-yellow-500 transition-all duration-300"
+                    >
+                      <div 
+                        className="w-full h-full p-2 opacity-80 group-hover:opacity-100 transition-opacity flex items-center justify-center [&_svg]:max-w-full [&_svg]:max-h-full [&_text]:hidden"
+                        dangerouslySetInnerHTML={{ __html: uvData.svg }}
+                      />
+                      <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300">
+                        <span className="bg-white/95 text-stone-900 text-[10px] font-black tracking-wide uppercase px-3 py-1.5 rounded-full shadow-lg border border-black/5">
+                          {labels.inspect}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setInspectedUVPart({ name: activePart.name, svg: uvData.svg, filename: uvData.filename })}
+                        className="flex-1 py-1.5 px-3 bg-yellow-500 hover:bg-yellow-600 text-white font-black text-[10px] tracking-wide uppercase rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        {labels.inspect}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const blob = new Blob([uvData.svg], { type: 'image/svg+xml;charset=utf-8' });
+                          const url = URL.createObjectURL(blob);
+                          const link = document.createElement('a');
+                          link.href = url;
+                          link.download = uvData.filename;
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                          URL.revokeObjectURL(url);
+                          setToast({
+                            message: language === 'he' ? 'מפת ה-UV הורדה בהצלחה!' : 'UV map downloaded successfully!',
+                            type: 'success'
+                          });
+                        }}
+                        className="py-1.5 px-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 hover:text-zinc-900 rounded-xl transition-all border border-black/5"
+                        title={labels.download}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -1902,6 +2084,87 @@ const App: React.FC = () => {
           </div>
         </div>,
         document.body
+      )}
+      {inspectedUVPart && (
+        <div className="fixed inset-0 bg-stone-950/80 backdrop-blur-xl z-[9999] flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-300">
+          <div className="bg-stone-900 border border-zinc-800 rounded-[2.5rem] w-full max-w-2xl overflow-hidden shadow-[0_30px_80px_rgba(0,0,0,0.8)] flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300" dir={isRTL ? 'rtl' : 'ltr'}>
+            
+            {/* Header */}
+            <div className="p-6 border-b border-zinc-800 flex items-center justify-between shrink-0">
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-yellow-500">
+                  {language === 'he' ? 'קואורדינטות UV מבודדות' : 'Isolated UV Coordinates Map'}
+                </span>
+                <h3 className="text-xl font-black text-white uppercase tracking-tight">
+                  {inspectedUVPart.name}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setInspectedUVPart(null)}
+                className="w-10 h-10 bg-zinc-800 hover:bg-zinc-750 text-zinc-400 hover:text-white rounded-full flex items-center justify-center transition-all"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* SVG Content Container */}
+            <div className="flex-1 bg-stone-950 p-6 flex items-center justify-center overflow-auto min-h-0 relative select-none">
+              <div 
+                className="w-full max-w-md aspect-square flex items-center justify-center [&_svg]:w-full [&_svg]:h-full border border-zinc-800/60 rounded-2xl p-4 bg-stone-900/40 relative shadow-inner"
+                dangerouslySetInnerHTML={{ __html: inspectedUVPart.svg }}
+              />
+            </div>
+
+            {/* Info and Actions Footer */}
+            <div className="p-6 border-t border-zinc-800 bg-stone-900/60 flex flex-col gap-4 shrink-0">
+              <div className="flex flex-col gap-1">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">
+                  {language === 'he' ? 'זיהוי UDIM והמלצת חומרים' : 'UDIM Tile & Material Recommendation'}
+                </span>
+                <p className="text-xs text-zinc-400 leading-relaxed font-normal">
+                  {language === 'he' 
+                    ? 'מפת ה-UV הזו נוצרה עבור חלק תלת-המימד הספציפי הזה ללא חפיפה. אנו ממליצים על טקסטורת PBR מרובעת מותאמת אישית ברזולוציית 2048x2048 לקבלת חדות מירבית.' 
+                    : 'This isolated UV map lets you target this mesh wireframe individually on its specific UDIM region. We recommend loading a high-detail custom PBR texture set (2048x2048 or higher) for optimal material representation.'}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setInspectedUVPart(null)}
+                  className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white font-bold text-xs tracking-wide uppercase rounded-xl transition-all"
+                >
+                  {language === 'he' ? 'סגור' : 'Close'}
+                </button>
+                <button
+                  onClick={() => {
+                    const blob = new Blob([inspectedUVPart.svg], { type: 'image/svg+xml;charset=utf-8' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = inspectedUVPart.filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    setToast({
+                      message: language === 'he' ? 'מפת ה-UV הורדה בהצלחה!' : 'UV map downloaded successfully!',
+                      type: 'success'
+                    });
+                  }}
+                  className="px-5 py-2.5 bg-yellow-500 hover:bg-yellow-600 text-stone-950 font-black text-xs tracking-wide uppercase rounded-xl transition-all flex items-center gap-2 shadow-lg"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  {language === 'he' ? 'הורד מפת UV (SVG)' : 'Download UV Map (SVG)'}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
       )}
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[10000] px-6 py-3.5 bg-zinc-900 border border-white/10 text-white rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-5 duration-300">
