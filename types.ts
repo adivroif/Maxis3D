@@ -55,6 +55,9 @@ export interface MaterialSettings {
   activeVariant: string | null;
   targetPartId?: string | null;
   flipY?: boolean;
+  wireframe?: boolean;
+  maxTextureSize?: number;
+  anisotropy?: number;
 }
 
 export interface MaterialMetadata {

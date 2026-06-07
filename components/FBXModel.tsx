@@ -716,6 +716,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
           tex.wrapT = THREE.RepeatWrapping;
           const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
           tex.flipY = shouldFlipY;
+          tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
           tex.needsUpdate = true;
           textureCacheRef.current[u] = tex;
           setTextureCache(prev => ({ ...prev, [u]: tex }));
@@ -728,13 +729,13 @@ const FBXModel: React.FC<FBXModelProps> = ({
         img.src = u;
         img.onload = () => {
           try {
-            // Cap max size to 1024 to dramatically reduce VRAM usage (16x memory reduction per texture!)
-            const maxDim = 1024;
+            // Cap max size according to settings or fallback to 4096 for gorgeous resolution (1024 was previously causing blurry decals)
+            const maxDim = settings.maxTextureSize !== undefined ? settings.maxTextureSize : 4096;
             let w = img.width;
             let h = img.height;
             let finalSource: HTMLImageElement | HTMLCanvasElement = img;
 
-            if (w > maxDim || h > maxDim) {
+            if (maxDim > 0 && (w > maxDim || h > maxDim)) {
               const ratio = Math.min(maxDim / w, maxDim / h);
               w = Math.round(w * ratio);
               h = Math.round(h * ratio);
@@ -744,9 +745,12 @@ const FBXModel: React.FC<FBXModelProps> = ({
               canvas.height = h;
               const ctx = canvas.getContext('2d');
               if (ctx) {
+                // Use higher quality image smoothing on canvas scale down to prevent pixelation artifacts
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
                 ctx.drawImage(img, 0, 0, w, h);
                 finalSource = canvas;
-                console.log(`[TextureOptimizer] Downscaled ${u} from ${img.width}x${img.height} to ${w}x${h}`);
+                console.log(`[TextureOptimizer] Downscaled ${u} from ${img.width}x${img.height} to ${w}x${h} (Cap: ${maxDim})`);
               }
             }
 
@@ -756,6 +760,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
             tex.wrapT = THREE.RepeatWrapping;
             const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
             tex.flipY = shouldFlipY;
+            tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
             tex.needsUpdate = true;
 
             textureCacheRef.current[u] = tex;
@@ -770,6 +775,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
               tex.wrapT = THREE.RepeatWrapping;
               const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
               tex.flipY = shouldFlipY;
+              tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
               tex.needsUpdate = true;
               textureCacheRef.current[u] = tex;
               setTextureCache(prev => ({ ...prev, [u]: tex }));
@@ -785,6 +791,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
             tex.wrapT = THREE.RepeatWrapping;
             const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
             tex.flipY = shouldFlipY;
+            tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
             tex.needsUpdate = true;
             textureCacheRef.current[u] = tex;
             setTextureCache(prev => ({ ...prev, [u]: tex }));
@@ -833,7 +840,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
           const mesh = child as THREE.Mesh;
           const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
           materials.forEach((mat) => {
-            if (mat instanceof THREE.MeshStandardMaterial) {
+            if (mat) {
               mat.needsUpdate = true;
             }
           });
@@ -841,6 +848,52 @@ const FBXModel: React.FC<FBXModelProps> = ({
       });
     }
   }, [settings.flipY, textureCache, fbx]);
+
+  // Synchronize anisotropy setting changes to all cached textures immediately
+  useEffect(() => {
+    const activeAnisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
+    let updated = false;
+    Object.values(textureCache).forEach((tex) => {
+      if (tex.anisotropy !== activeAnisotropy) {
+        tex.anisotropy = activeAnisotropy;
+        tex.needsUpdate = true;
+        updated = true;
+      }
+    });
+    if (updated && fbx) {
+      fbx.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          const mesh = child as THREE.Mesh;
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          materials.forEach((mat) => {
+            if (mat) {
+              mat.needsUpdate = true;
+            }
+          });
+        }
+      });
+    }
+  }, [settings.anisotropy, textureCache, fbx]);
+
+  // Flush texture cache when max resolution limit changes so textures are re-rendered at the new cap size
+  useEffect(() => {
+    if (settings.maxTextureSize === undefined) return;
+    console.log("[FBXModel] 🔄 Texture resolution limit changed. Flushing cache to re-decode at:", settings.maxTextureSize);
+    
+    // Dispose previous textures to free up GPU memory
+    Object.values(textureCacheRef.current).forEach((tex) => {
+      if (tex && typeof tex.dispose === 'function') {
+        try {
+          tex.dispose();
+        } catch (e) {
+          console.warn("[FBXModel] Error disposing texture:", e);
+        }
+      }
+    });
+    
+    textureCacheRef.current = {};
+    setTextureCache({});
+  }, [settings.maxTextureSize]);
 
   // ── Animation control ────────────────────────────────────────────────────
   useEffect(() => {
@@ -921,6 +974,16 @@ const FBXModel: React.FC<FBXModelProps> = ({
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
 
       materials.forEach((mat) => {
+        // Apply wireframe mode to all materials dynamically
+        if (mat) {
+          (mat as any).wireframe = !!settings.wireframe;
+          mat.needsUpdate = true;
+        }
+        if (mesh.userData.backFaceMat) {
+          (mesh.userData.backFaceMat as any).wireframe = !!settings.wireframe;
+          (mesh.userData.backFaceMat as any).needsUpdate = true;
+        }
+
         if (!(mat instanceof THREE.MeshStandardMaterial) || !mat.userData.isPBR) return;
 
         // ── 1. Resolve best TextureSet for this mesh/material ──────────────
@@ -1015,7 +1078,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
           if (mat.alphaMap) mat.alphaTest = 0.1;
 
           // Stable transparency sorting
-          mat.depthWrite = settings.opacity > 0.92; // Keep depth for near-opaque
+          mat.depthWrite = settings.opacity > 0.85; // Keep depth write for high-opacity objects (including those with alpha maps) to prevent sorting glitched faces!
           mesh.frustumCulled = false; 
           
           if (isShell) {
@@ -1241,8 +1304,20 @@ const FBXModel: React.FC<FBXModelProps> = ({
       try {
         const combinedSvg = generateUVSVG(fbx);
         if (combinedSvg && !isCancelled) {
-          const parts = url.split('/');
-          const lastPart = parts[parts.length - 1];
+          let lastPart = url.split('/').pop() || '';
+          if (lastPart.includes('?')) {
+            try {
+              const searchParams = new URLSearchParams(lastPart.split('?')[1]);
+              const qFileName = searchParams.get('fileName') || searchParams.get('filename');
+              if (qFileName) {
+                lastPart = qFileName;
+              } else {
+                lastPart = lastPart.split('?')[0];
+              }
+            } catch (e) {
+              lastPart = lastPart.split('?')[0];
+            }
+          }
           const baseName = lastPart.toLowerCase().replace(/\.fbx$/i, '');
           const combinedFilename = `${baseName}_uv_layout.svg`;
 
@@ -1277,8 +1352,20 @@ const FBXModel: React.FC<FBXModelProps> = ({
           const svg = generateSingleMeshUVSVG(mesh);
           if (!svg) continue;
 
-          const parts = url.split('/');
-          const lastPart = parts[parts.length - 1];
+          let lastPart = url.split('/').pop() || '';
+          if (lastPart.includes('?')) {
+            try {
+              const searchParams = new URLSearchParams(lastPart.split('?')[1]);
+              const qFileName = searchParams.get('fileName') || searchParams.get('filename');
+              if (qFileName) {
+                lastPart = qFileName;
+              } else {
+                lastPart = lastPart.split('?')[0];
+              }
+            } catch (e) {
+              lastPart = lastPart.split('?')[0];
+            }
+          }
           const baseName = lastPart.toLowerCase().replace(/\.fbx$/i, '');
           const meshCleanName = mesh.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
           const partFilename = `${baseName}_part_${meshCleanName}_uv_layout.svg`;

@@ -6,6 +6,7 @@ import { OrbitControls, PerspectiveCamera, Environment, Float, Html, Center } fr
 import * as THREE from 'three';
 import './types';
 import FBXModel from './components/FBXModel';
+import { ModelErrorBoundary } from './components/ModelErrorBoundary';
 import Sidebar from './components/Sidebar';
 import CameraControls from './components/CameraControls';
 import { MaterialSettings, SceneModelInstance, ModelPart, ColorVariant, TextureSet } from './types';
@@ -368,6 +369,43 @@ const App: React.FC = () => {
 
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
   const [environmentUrl, setEnvironmentUrl] = useState<string | null>(null);
+  const [envPreset, setEnvPreset] = useState<string>('sunset');
+  
+  const envPresetLabels = useMemo(() => ({
+    en: {
+      title: "Environment",
+      city: "City",
+      studio: "Studio",
+      warehouse: "Warehouse",
+      lobby: "Lobby",
+      sunset: "Sunset"
+    },
+    he: {
+      title: "תאורת סביבה",
+      city: "עירוני",
+      studio: "סטודיו נקי",
+      warehouse: "מחסן תעשייתי",
+      lobby: "לובי",
+      sunset: "שקיעה חמה"
+    },
+    ar: {
+      title: "إضاءة البيئة",
+      city: "شارع المدينة",
+      studio: "استوديو",
+      warehouse: "مستودع",
+      lobby: "ردهة",
+      sunset: "غروب الشمس"
+    },
+    ru: {
+      title: "Окружение",
+      city: "Город",
+      studio: "Студия",
+      warehouse: "Склад",
+      lobby: "Холл",
+      sunset: "Закат"
+    }
+  }), []);
+
   const [modelParts, setModelParts] = useState<ModelPart[]>([]);
   const [isFetchingParts, setIsFetchingParts] = useState(false);
   const [hoveredPartId, setHoveredPartId] = useState<string | null>(null);
@@ -540,7 +578,10 @@ const App: React.FC = () => {
     isPlayingAnimation: false,
     animationDirection: 'backward',
     colorVariants: [], activeVariant: null,
-    flipY: true
+    flipY: true,
+    wireframe: false,
+    maxTextureSize: 4096,
+    anisotropy: 16
   });
 
   const handlePartClick = useCallback(async (part: { id: string, name: string, description: string, position: THREE.Vector3, size: THREE.Vector3, mesh: THREE.Mesh } | null) => {
@@ -1057,6 +1098,16 @@ const App: React.FC = () => {
           globalMatches.forEach((m: any) => {
             const { tex, colorName } = m;
             sortedMaterials.forEach((matName) => {
+              // Special case for alpha/opacity maps to prevent them from making solid parts disappear
+              if (type === 'alpha') {
+                const matLower = matName.toLowerCase();
+                const isAlphaMaterial = ['middle', 'glass', 'lens', 'trans', 'alpha', 'window', 'acrylic']
+                  .some(k => matLower.includes(k));
+                if (!isAlphaMaterial && sortedMaterials.length > 1) {
+                  // Skip this material as it should remain opaque
+                  return;
+                }
+              }
               if (!hasExistingMapping(matName, type, colorName)) {
                 setMapping(matName, type, tex.url, colorName);
               }
@@ -1374,52 +1425,6 @@ const App: React.FC = () => {
                 )}
               </button>
 
-              {/* FlipY UV Mapping Toggle Option */}
-              {selectedId && (() => {
-                const selModel = models.find(m => m.id === selectedId);
-                if (!selModel) return null;
-                const isFlippedY = selModel.settings.flipY !== false; // default true
-                return (
-                  <button
-                    onClick={() => updateModelSettings(selectedId, { flipY: !isFlippedY })}
-                    className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-black/5 flex items-center justify-center transition-all group ${!isFlippedY ? 'bg-zinc-800 text-yellow-500 border-zinc-700' : 'bg-white text-zinc-400 hover:text-zinc-800'}`}
-                    title={t.flipY}
-                  >
-                    <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-                    </svg>
-                  </button>
-                );
-              })()}
-
-              {/* Export/Download UV Map Button */}
-              {selectedId && uvLayoutSvg && (
-                <button
-                  onClick={() => {
-                    const blob = new Blob([uvLayoutSvg], { type: 'image/svg+xml;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = uvLayoutFilename || 'axe_uv_layout.svg';
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                    setToast({
-                      message: language === 'he' ? 'מפת ה-UV הורדה בהצלחה!' : 'UV map downloaded successfully!',
-                      type: 'success'
-                    });
-                  }}
-                  className="w-10 h-10 sm:w-12 sm:h-12 bg-white hover:bg-emerald-50 rounded-xl border border-black/5 flex items-center justify-center transition-all group text-emerald-500 hover:text-emerald-700"
-                  title={language === 'he' ? 'הורד מפת UV (וקטור SVG)' : 'Download UV Map (Vector SVG)'}
-                >
-                  <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v14a1 1 0 01-1 1H5a1 1 0 01-1-1V5z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 4v16M15 4v16M4 9h16M4 15h16" />
-                  </svg>
-                </button>
-              )}
-
               {/* Language Selector */}
               <div className="flex flex-col gap-1 bg-zinc-50 p-1 rounded-xl border border-black/5">
                 {(['en', 'he', 'ar', 'ru'] as Language[]).map((lang) => (
@@ -1486,46 +1491,58 @@ const App: React.FC = () => {
             {environmentUrl ? (
               <Environment files={environmentUrl} />
             ) : (
-              <Environment preset="city" />
+              <Environment preset={envPreset as any} />
             )}
             {models.map((model) => (
               <group key={model.id} position={model.position} onPointerDown={(e) => { e.stopPropagation(); if (selectedId !== model.id) setSelectedId(model.id); }}>
-                <FBXModel 
-                  url={model.url} 
-                  settings={model.settings} 
-                  textureSets={model.textureSets}
-                  modelParts={modelParts}
-                  activePartId={activePart?.id}
-                  onPartClick={handlePartClick}
-                  onMaterialsLoaded={(mats) => {
-                    updateModelData(model.id, { detectedMaterials: mats });
-                    if (model.detectedMaterials.length === 0) {
-                      autoMapTextures(model.id, mats);
-                    }
+                <ModelErrorBoundary
+                  modelName={model.name}
+                  language={language}
+                  onRetry={() => {
+                    console.log(`[ErrorBoundary Option] Retrying model load for: ${model.name}`);
+                    const freshUrl = model.url.includes('&v=')
+                      ? model.url.replace(/&v=\d+/, `&v=${Date.now()}`)
+                      : `${model.url}&v=${Date.now()}`;
+                    updateModelData(model.id, { url: freshUrl });
                   }}
-                  onMeshesLoaded={(meshes) => {
-                    updateModelData(model.id, { detectedMeshes: meshes });
-                  }} 
-                  onAnimationsDetected={(has) => {
-                    if (model.hasAnimations !== has) {
-                      updateModelData(model.id, { hasAnimations: has });
-                    }
-                  }}
-                  onAnimationFinished={handleAnimationFinished}
-                  translatedParts={translatedParts}
-                  isMobile={isMobile}
-                  hoveredPartId={hoveredPartId}
-                  onUVLayoutGenerated={(svg, filename) => {
-                    setUvLayoutSvg(svg);
-                    setUvLayoutFilename(filename);
-                  }}
-                  onPartUVLayoutGenerated={(meshName, svg, filename) => {
-                    setPartUVMaps(prev => ({
-                      ...prev,
-                      [meshName]: { svg, filename }
-                    }));
-                  }}
-              />
+                >
+                  <FBXModel 
+                    url={model.url} 
+                    settings={model.settings} 
+                    textureSets={model.textureSets}
+                    modelParts={modelParts}
+                    activePartId={activePart?.id}
+                    onPartClick={handlePartClick}
+                    onMaterialsLoaded={(mats) => {
+                      updateModelData(model.id, { detectedMaterials: mats });
+                      if (model.detectedMaterials.length === 0) {
+                        autoMapTextures(model.id, mats);
+                      }
+                    }}
+                    onMeshesLoaded={(meshes) => {
+                      updateModelData(model.id, { detectedMeshes: meshes });
+                    }} 
+                    onAnimationsDetected={(has) => {
+                      if (model.hasAnimations !== has) {
+                        updateModelData(model.id, { hasAnimations: has });
+                      }
+                    }}
+                    onAnimationFinished={handleAnimationFinished}
+                    translatedParts={translatedParts}
+                    isMobile={isMobile}
+                    hoveredPartId={hoveredPartId}
+                    onUVLayoutGenerated={(svg, filename) => {
+                      setUvLayoutSvg(svg);
+                      setUvLayoutFilename(filename);
+                    }}
+                    onPartUVLayoutGenerated={(meshName, svg, filename) => {
+                      setPartUVMaps(prev => ({
+                        ...prev,
+                        [meshName]: { svg, filename }
+                      }));
+                    }}
+                  />
+                </ModelErrorBoundary>
               </group>
             ))}
           </Suspense>
@@ -1956,7 +1973,7 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex">
                       <button
                         onClick={() => setInspectedUVPart({ name: activePart.name, svg: uvData.svg, filename: uvData.filename })}
                         className="flex-1 py-1.5 px-3 bg-yellow-500 hover:bg-yellow-600 text-white font-black text-[10px] tracking-wide uppercase rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
@@ -1966,30 +1983,6 @@ const App: React.FC = () => {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                         </svg>
                         {labels.inspect}
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          const blob = new Blob([uvData.svg], { type: 'image/svg+xml;charset=utf-8' });
-                          const url = URL.createObjectURL(blob);
-                          const link = document.createElement('a');
-                          link.href = url;
-                          link.download = uvData.filename;
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                          URL.revokeObjectURL(url);
-                          setToast({
-                            message: language === 'he' ? 'מפת ה-UV הורדה בהצלחה!' : 'UV map downloaded successfully!',
-                            type: 'success'
-                          });
-                        }}
-                        className="py-1.5 px-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 hover:text-zinc-900 rounded-xl transition-all border border-black/5"
-                        title={labels.download}
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                        </svg>
                       </button>
                     </div>
                   </div>
@@ -2133,32 +2126,9 @@ const App: React.FC = () => {
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   onClick={() => setInspectedUVPart(null)}
-                  className="px-5 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white font-bold text-xs tracking-wide uppercase rounded-xl transition-all"
+                  className="px-5 py-2.5 bg-yellow-500 hover:bg-yellow-600 text-stone-950 font-black text-xs tracking-wide uppercase rounded-xl transition-all shadow-lg"
                 >
                   {language === 'he' ? 'סגור' : 'Close'}
-                </button>
-                <button
-                  onClick={() => {
-                    const blob = new Blob([inspectedUVPart.svg], { type: 'image/svg+xml;charset=utf-8' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = inspectedUVPart.filename;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                    setToast({
-                      message: language === 'he' ? 'מפת ה-UV הורדה בהצלחה!' : 'UV map downloaded successfully!',
-                      type: 'success'
-                    });
-                  }}
-                  className="px-5 py-2.5 bg-yellow-500 hover:bg-yellow-600 text-stone-950 font-black text-xs tracking-wide uppercase rounded-xl transition-all flex items-center gap-2 shadow-lg"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                  {language === 'he' ? 'הורד מפת UV (SVG)' : 'Download UV Map (SVG)'}
                 </button>
               </div>
             </div>

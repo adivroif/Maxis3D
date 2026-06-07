@@ -113,10 +113,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         const serverLikes = updatedProduct.likesCount ?? updatedProduct.LikesCount ?? 0;
         setLikesCounts(prev => ({ ...prev, [normalizedName]: serverLikes }));
       } else {
-        console.error(`Failed to send like update for ${productName}`);
+        console.warn(`Failed to send like update for ${productName}`);
       }
     } catch (err) {
-      console.error(`Error sending like update for ${productName}:`, err);
+      console.warn(`Error sending like update for ${productName}:`, err);
     }
   };
 
@@ -148,7 +148,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       
       setInventory(prev => ({ ...prev, [normalizedName]: 10 }));
     } catch (err) {
-      console.error(`Failed to fetch inventory for ${productName}:`, err);
+      console.warn(`Failed to fetch inventory for ${productName}:`, err);
       setInventory(prev => ({ ...prev, [normalizedName]: 10 }));
     }
   };
@@ -205,7 +205,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             }
           }
         } catch (jsonErr) {
-          console.error("Failed to parse product JSON:", jsonErr);
+          console.warn("Failed to parse product JSON:", jsonErr);
           setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
         }
       } else if (res.status === 404) {
@@ -217,7 +217,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
       }
     } catch (err) {
-      console.error("Fetch error for product:", err);
+      console.warn("Fetch error for product:", err);
       setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
     }
   };
@@ -232,7 +232,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         }
       }
     } catch (err) {
-      console.error("Failed to fetch categories:", err);
+      console.warn("Failed to fetch categories:", err);
     }
   };
 
@@ -276,7 +276,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         setR2Textures(textures);
       }
     } catch (err) {
-      console.error("Catalog Texture Fetch Error:", err);
+      console.warn("Catalog Texture Fetch Error:", err);
     } finally {
       setIsLoadingR2(false);
     }

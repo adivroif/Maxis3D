@@ -244,6 +244,120 @@ function fuzzyLocateCachedFile(folder: string, requestedFileName: string): strin
   return null;
 }
 
+// Helper to locate a file in the virtual list (images_tenantA.json or tenants_tenantA.json) before it is downloaded to disk
+function fuzzyLocateInFileList(folder: string, requestedFileName: string, clientName: string): string | null {
+  const cachePath = getLocalCachedListPath(folder, clientName);
+  if (!fs.existsSync(cachePath)) return null;
+
+  try {
+    const listData = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    const items = Array.isArray(listData) ? listData : (listData.files || listData.items || listData.data || []);
+    if (!items || items.length === 0) return null;
+
+    const fileNames: string[] = items.map((item: any) => {
+      if (typeof item === 'string') return item;
+      return item.fileName || item.FileName || item.name || item.Name || "";
+    }).filter(Boolean);
+
+    // 1. Direct match check first
+    if (fileNames.includes(requestedFileName)) {
+      return requestedFileName;
+    }
+
+    // 2. Case-insensitive exact trim match
+    const reqLower = requestedFileName.toLowerCase().trim();
+    const lcMatch = fileNames.find(f => f.toLowerCase().trim() === reqLower);
+    if (lcMatch) return lcMatch;
+
+    // 3. Special clean check for UDIM numbers and other variants
+    const reqExt = path.extname(requestedFileName).toLowerCase();
+    const reqBase = path.basename(requestedFileName, reqExt).trim();
+    const reqNormalized = reqBase.replace(/[^a-z0-9]/gi, "").toLowerCase();
+
+    let bestMatch: string | null = null;
+    let bScore = 0;
+
+    for (const fileName of fileNames) {
+      const diskExt = path.extname(fileName).toLowerCase();
+      const diskBase = path.basename(fileName, diskExt).trim();
+      const sameExt = diskExt === reqExt;
+      const diskNormalized = diskBase.replace(/[^a-z0-9]/gi, "").toLowerCase();
+
+      let score = 0;
+
+      // Class 1: Starts with reqBase followed by a dot/underscore and a number (UDIM mismatch)
+      // e.g., Axe__pblue_axe__BaseColor.1002.png from Axe__pblue_axe__BaseColor.png
+      const escapedBase = reqBase.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const udimRegex = new RegExp("^" + escapedBase + "[._]?\\d+$", "i");
+      if (udimRegex.test(diskBase)) {
+        score = 95;
+      }
+      // Class 2: diskBase contains reqBase
+      else if (diskBase.toLowerCase().startsWith(reqBase.toLowerCase()) || reqBase.toLowerCase().startsWith(diskBase.toLowerCase())) {
+        score = 80;
+      }
+      // Class 3: Normalized alphabetic matching
+      else if (reqNormalized && diskNormalized && reqNormalized === diskNormalized) {
+        score = 75;
+      }
+      // Class 4: Contains
+      else if (reqNormalized && diskNormalized && (diskNormalized.includes(reqNormalized) || reqNormalized.includes(diskNormalized))) {
+        score = 60;
+      }
+
+      // Tie-breakers
+      if (score > 0) {
+        const diskBaseLower = diskBase.toLowerCase();
+        const reqBaseLower = reqBase.toLowerCase();
+        
+        // If they have same extension
+        if (sameExt) {
+          score += 5;
+        }
+
+        // If they both mention similar suffixes or neither mentions other map types
+        const mapKeywords = ['normal', 'metal', 'rough', 'opacity', 'alpha', 'ao', 'height', 'emissive', 'specular', 'bump', 'basecolor', 'diffuse', 'albedo', 'color'];
+        const reqHasKeyword = mapKeywords.some(kw => reqBaseLower.includes(kw));
+        const diskHasKeyword = mapKeywords.some(kw => diskBaseLower.includes(kw));
+        
+        if (reqHasKeyword && diskHasKeyword) {
+          // If they match the specific map type keyword
+          for (const kw of mapKeywords) {
+            if (reqBaseLower.includes(kw) && diskBaseLower.includes(kw)) {
+              score += 10;
+            }
+          }
+        } else if (!reqHasKeyword && !diskHasKeyword) {
+          // Both are standard maps
+          score += 5;
+        } else if (!reqHasKeyword && diskHasKeyword) {
+          // Requested has no special slot keyword but disk file does. Prefer basecolor/diffuse/albedo if present
+          if (diskBaseLower.includes('basecolor') || diskBaseLower.includes('diffuse') || diskBaseLower.includes('albedo')) {
+            score += 4;
+          } else {
+            // Penalize other slots if not matching requested intent
+            score -= 10;
+          }
+        }
+      }
+
+      if (score > bScore) {
+        bScore = score;
+        bestMatch = fileName;
+      }
+    }
+
+    if (bScore >= 50 && bestMatch) {
+      console.log(`[Fuzzy List Matcher] Resolved virtual "${requestedFileName}" to real file "${bestMatch}" (score: ${bScore})`);
+      return bestMatch;
+    }
+  } catch (err: any) {
+    console.error(`[Fuzzy List Matcher Error] Failed to search metadata list:`, err.message);
+  }
+
+  return null;
+}
+
 // --- CIRCUIT BREAKER FOR AZURE WEB SERVICE ---
 let isAzureUnreachable = false;
 let lastAzureFailureTimestamp = 0;
@@ -310,7 +424,7 @@ async function robustFetchWithRetry(url: string, options: any = {}, initialTimeo
     if (attempt < maxRetries) {
       await new Promise(resolve => setTimeout(resolve, delay));
       delay *= 1.5; // smoother exponential backoff
-      timeout = Math.min(timeout + 5000, 30000); // increase progressively up to 30s max
+      timeout = Math.min(Math.max(timeout + 5000, initialTimeout), 120000); // increase progressively up to 120s max based on initial timeout
     }
   }
 
@@ -399,6 +513,79 @@ const defaultAxeParts = [
   }
 ];
 
+const defaultPipeParts = [
+  {
+    id: "pipe_middle",
+    modelName: "Pipe",
+    partName: "Pipe Middle Section",
+    partKey: "middle",
+    description: "Main tubular conduit of the pipeline structure.",
+    presentAtSite: true
+  },
+  {
+    id: "pipe_flanges",
+    modelName: "Pipe",
+    partName: "Pipe Top & Bottom Flanges",
+    partKey: "top___bottom",
+    description: "The structural connection rims at both ends of the pipe used for coupling.",
+    presentAtSite: true
+  }
+];
+
+const defaultChestParts = [
+  {
+    id: "chest_body",
+    modelName: "Chest",
+    partName: "Chest Body",
+    partKey: "pCube11",
+    description: "The main storage structure of the container, built for heavy protection.",
+    presentAtSite: true
+  },
+  {
+    id: "chest_lid",
+    modelName: "Chest",
+    partName: "Chest Lid & Cover",
+    partKey: "pCube14",
+    description: "The hinged protective top segment allowing access into the storage void.",
+    presentAtSite: true
+  },
+  {
+    id: "chest_lock",
+    modelName: "Chest",
+    partName: "Reinforced Locking Hasp",
+    partKey: "pCube39",
+    description: "Heavy-duty locking latch system to secure internal contents.",
+    presentAtSite: true
+  }
+];
+
+const defaultElsaParts = [
+  {
+    id: "elsa_pin",
+    modelName: "ELSA 2 Caliper Guide Pin 35X144mm",
+    partName: "Caliper Guide Pin",
+    partKey: "elsa_2_caliper_guide_pin_35_144_mm",
+    description: "Precision-engineered guide pin for automotive caliper slide assembly (35x144mm).",
+    presentAtSite: true
+  },
+  {
+    id: "elsa_boot",
+    modelName: "ELSA 2 Caliper Guide Pin 35X144mm",
+    partName: "Protective Dust Boot",
+    partKey: "boot",
+    description: "Flexible rubber dust seal protecting the sliding pin from contaminants.",
+    presentAtSite: true
+  },
+  {
+    id: "elsa_bolt",
+    modelName: "ELSA 2 Caliper Guide Pin 35X144mm",
+    partName: "Securing Anchor Bolt",
+    partKey: "bolt",
+    description: "Hex-head high-strength fastener anchoring the guide pin into position.",
+    presentAtSite: true
+  }
+];
+
 function initializePartsCache() {
   try {
     let cacheData: any = {};
@@ -412,6 +599,30 @@ function initializePartsCache() {
     }
     if (!cacheData["axe"]) {
       cacheData["axe"] = defaultAxeParts.map(p => ({ ...p, modelName: "axe" }));
+    }
+
+    // Seed default parts for Pipe
+    if (!cacheData["Pipe"]) {
+      cacheData["Pipe"] = defaultPipeParts;
+    }
+    if (!cacheData["pipe"]) {
+      cacheData["pipe"] = defaultPipeParts.map(p => ({ ...p, modelName: "pipe" }));
+    }
+
+    // Seed default parts for Chest
+    if (!cacheData["Chest"]) {
+      cacheData["Chest"] = defaultChestParts;
+    }
+    if (!cacheData["chest"]) {
+      cacheData["chest"] = defaultChestParts.map(p => ({ ...p, modelName: "chest" }));
+    }
+
+    // Seed default parts for ELSA
+    if (!cacheData["ELSA 2 Caliper Guide Pin 35X144mm"]) {
+      cacheData["ELSA 2 Caliper Guide Pin 35X144mm"] = defaultElsaParts;
+    }
+    if (!cacheData["elsa 2 caliper guide pin 35x144mm"]) {
+      cacheData["elsa 2 caliper guide pin 35x144mm"] = defaultElsaParts.map(p => ({ ...p, modelName: "elsa 2 caliper guide pin 35x144mm" }));
     }
     
     fs.writeFileSync(cacheFilePath, JSON.stringify(cacheData, null, 2), "utf-8");
@@ -460,8 +671,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: "100mb" }));
+  app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
   // Ensure uploads directory exists
   const uploadDir = path.join(process.cwd(), "public", "uploads");
@@ -559,10 +770,10 @@ async function startServer() {
     if (hasCache) {
       console.log(`[Cache First] Serving model parts instantly from cache for: ${modelName}`);
 
-      // Asynchronously refresh in the background
+      // Asynchronously refresh in the background with a larger timeout to avoid timeout warnings
       (async () => {
         try {
-          await tryFetchParts(modelName, 3500, 1, false);
+          await tryFetchParts(modelName, 15000, 1, false);
         } catch (bgErr: any) {
           console.log(`[Cache Background Update Status] Skip refreshing model parts: ${bgErr.message}`);
         }
@@ -572,12 +783,12 @@ async function startServer() {
     }
 
     try {
-      // Use strictly the modelName (usually the filename) for the parts lookup
-      let parts = await tryFetchParts(modelName, 5000, 2, !hasCache);
+      // Use strictly the modelName (usually the filename) for the parts lookup with a robust timeout
+      let parts = await tryFetchParts(modelName, 15000, 2, !hasCache);
 
-      // FALLBACK: If API query failed (due to timeout/network) or returned empty, check our local persistent cache
+      // FALLBACK: Serve cached or pre-seeded data if primary API did not return parts or is slow
       if (!parts || parts.length === 0) {
-        console.log(`Azure API query failed, timed out, or returned empty for '${modelName}'. Fetching from local cache...`);
+        console.log(`Serving cached and seeded backup for model: ${modelName}`);
         parts = getCachedParts(modelName);
       }
 
@@ -651,7 +862,7 @@ async function startServer() {
 
     const hasCache = fs.existsSync(cachePath);
 
-    const tryFetch = async (title: string, timeout = 3500, maxRetries = 2, bypassCircuitBreaker = !hasCache) => {
+    const tryFetch = async (title: string, timeout = 15000, maxRetries = 2, bypassCircuitBreaker = !hasCache) => {
       try {
         const url = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/Products/productTitle/${encodeURIComponent(title)}`;
         const resp = await robustFetchWithRetry(url, {}, timeout, maxRetries, bypassCircuitBreaker);
@@ -699,16 +910,16 @@ async function startServer() {
         
         (async () => {
           try {
-            let data = await tryFetch(cleanModelName, 3000, 1, true);
+            let data = await tryFetch(cleanModelName, 8000, 1, true);
             if (!data) {
               for (const variant of uniqueVariations) {
                 if (variant === cleanModelName) continue;
-                data = await tryFetch(variant, 1500, 1, true);
+                data = await tryFetch(variant, 4000, 1, true);
                 if (data) break;
               }
             }
             if (!data && !uniqueVariations.includes("Connector")) {
-              data = await tryFetch("Connector", 1500, 1, true);
+              data = await tryFetch("Connector", 4000, 1, true);
             }
             if (data) {
               if (!fs.existsSync(productsCacheDir)) {
@@ -746,7 +957,7 @@ async function startServer() {
       let data = null;
 
       // Determine tuning parameters based on cache status
-      const firstTimeout = hasCache ? 2000 : 4000;
+      const firstTimeout = hasCache ? 4000 : 8000;
       const firstRetries = hasCache ? 1 : 2;
 
       // 1. Try to fetch the primary variation first
@@ -756,7 +967,7 @@ async function startServer() {
       if (!data) {
         for (const variant of uniqueVariations) {
           if (variant === cleanModelName) continue;
-          data = await tryFetch(variant, 2000, 1);
+          data = await tryFetch(variant, 4000, 1);
           if (data) {
             console.log(`Matched product using variation: ${variant}`);
             break;
@@ -766,7 +977,7 @@ async function startServer() {
       
       // 3. Final fallback to "Connector" only if absolutely necessary and not already tried
       if (!data && !uniqueVariations.includes("Connector")) {
-        data = await tryFetch("Connector", 2000, 1);
+        data = await tryFetch("Connector", 4000, 1);
       }
 
       // If we fetched successfully, save to cache
@@ -921,16 +1132,23 @@ async function startServer() {
   async function handleGetFileResiliently(folder: string, fileName: string, clientName: string, res: any) {
     const activeClient = clientName || "tenantA";
     
-    // Step 1: Check for exact match in the disk cache
+    // Step 0: Pre-resolve virtual/relative filenames using the metadata list if available
     let targetFileName = fileName;
+    const listResolvedName = fuzzyLocateInFileList(folder, fileName, activeClient);
+    if (listResolvedName) {
+      console.log(`[Cache System] Pre-resolved virtual filename "${fileName}" to real filename "${listResolvedName}" via metadata list`);
+      targetFileName = listResolvedName;
+    }
+
+    // Step 1: Check for exact match in the disk cache
     let localFilePath = getLocalCachedFilePath(folder, targetFileName);
     let hasCache = fs.existsSync(localFilePath);
 
-    // Step 2: Try fuzzy-matching on disk before calling Azure
+    // Step 2: Try fuzzy-matching on disk before calling Azure as a safeguard
     if (!hasCache) {
-      const fuzzyDiskName = fuzzyLocateCachedFile(folder, fileName);
+      const fuzzyDiskName = fuzzyLocateCachedFile(folder, targetFileName);
       if (fuzzyDiskName) {
-        console.log(`[Cache System] Fuzzy match found on disk: "${fileName}" mapped to "${fuzzyDiskName}"`);
+        console.log(`[Cache System] Fuzzy match found on disk: "${targetFileName}" mapped to "${fuzzyDiskName}"`);
         targetFileName = fuzzyDiskName;
         localFilePath = getLocalCachedFilePath(folder, targetFileName);
         hasCache = true;
@@ -957,15 +1175,19 @@ async function startServer() {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "public, max-age=31536000");
       
-      const stream = fs.createReadStream(localFilePath);
-      return stream.pipe(res);
+      return res.sendFile(path.resolve(localFilePath));
     }
 
-    // Step 3: Call Azure since we had a cache miss
-    const azureFileUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-file?folder=${folder}&fileName=${encodeURIComponent(fileName)}&clientName=${activeClient}`;
+    // Step 3: Call Azure since we had a cache miss (requesting targetFileName)
+    const azureFileUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-file?folder=${folder}&fileName=${encodeURIComponent(targetFileName)}&clientName=${activeClient}`;
     try {
-      console.log(`[Proxy] Resilient request for ${folder}/${fileName}. URL: ${azureFileUrl} (cacheStatus: MISS)`);
-      const response = await robustFetchWithRetry(azureFileUrl, {}, 20000, 2, true);
+      console.log(`[Proxy] Resilient request for ${folder}/${targetFileName} (original: ${fileName}). URL: ${azureFileUrl} (cacheStatus: MISS)`);
+      
+      const ext = path.extname(targetFileName).toLowerCase();
+      const isFbx = ext === '.fbx';
+      const fetchTimeout = isFbx ? 90000 : 30000;
+      
+      const response = await robustFetchWithRetry(azureFileUrl, {}, fetchTimeout, isFbx ? 3 : 2, true);
       
       if (!response.ok) {
         throw new Error(`Azure responded with non-ok status: ${response.status}`);
@@ -981,6 +1203,15 @@ async function startServer() {
         throw new Error("Azure API returned an HTML document/error page instead of valid binary asset data");
       }
 
+      // Content-Length / integrity safeguard
+      const lengthHeader = response.headers.get("content-length");
+      if (lengthHeader) {
+        const expectedLength = parseInt(lengthHeader, 10);
+        if (!isNaN(expectedLength) && buffer.length < expectedLength) {
+          throw new Error(`Incomplete download: received only ${buffer.length} out of ${expectedLength} bytes`);
+        }
+      }
+
       try {
         const folderCacheDir = path.dirname(localFilePath);
         if (!fs.existsSync(folderCacheDir)) {
@@ -989,11 +1220,10 @@ async function startServer() {
         fs.writeFileSync(localFilePath, buffer);
         console.log(`[Cache System] Successfully saved file to local cache: ${localFilePath}`);
       } catch (writeErr: any) {
-        console.error(`[Cache System] Failed to write cache for ${fileName}:`, writeErr.message);
+        console.error(`[Cache System] Failed to write cache for ${targetFileName}:`, writeErr.message);
       }
 
       // Set headers and send
-      const ext = path.extname(fileName).toLowerCase();
       const mimeTypes: Record<string, string> = {
         '.fbx': 'application/octet-stream',
         '.png': 'image/png',
@@ -1012,10 +1242,10 @@ async function startServer() {
       res.setHeader("Cache-Control", "public, max-age=31536000");
       return res.send(buffer);
     } catch (err: any) {
-      console.warn(`[Proxy Fallback] Failed to fetch live file ${fileName} (${err.message}). Checking disk cache...`);
+      console.warn(`[Proxy Fallback] Failed to fetch live file ${targetFileName} (${err.message}). Checking disk cache...`);
       
       // Step 4: Final recovery check for fuzzy-matched files in disk cache
-      const fuzzyDiskName = fuzzyLocateCachedFile(folder, fileName);
+      const fuzzyDiskName = fuzzyLocateCachedFile(folder, targetFileName) || fuzzyLocateCachedFile(folder, fileName);
       if (fuzzyDiskName) {
         const fuzzyFilePath = getLocalCachedFilePath(folder, fuzzyDiskName);
         console.log(`[Cache Fallback] Serving cached fuzzy match: ${fuzzyFilePath}`);
@@ -1037,12 +1267,11 @@ async function startServer() {
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=31536000");
         
-        const stream = fs.createReadStream(fuzzyFilePath);
-        return stream.pipe(res);
+        return res.sendFile(path.resolve(fuzzyFilePath));
       } else if (fs.existsSync(localFilePath)) {
         // If exact path exists (e.g. was created concurrently inside another worker / stream)
         console.log(`[Cache System] Serving cached copy of: ${localFilePath}`);
-        const ext = path.extname(fileName).toLowerCase();
+        const ext = path.extname(targetFileName).toLowerCase();
         const mimeTypes: Record<string, string> = {
           '.fbx': 'application/octet-stream',
           '.png': 'image/png',
@@ -1060,10 +1289,9 @@ async function startServer() {
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Cache-Control", "public, max-age=31536000");
         
-        const stream = fs.createReadStream(localFilePath);
-        return stream.pipe(res);
+        return res.sendFile(path.resolve(localFilePath));
       } else {
-        console.error(`[Proxy Fallback Error] File ${fileName} not in cache and live server failed.`);
+        console.error(`[Proxy Fallback Error] File ${targetFileName} (original: ${fileName}) not in cache and live server failed.`);
         res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
         return res.status(502).send(`Azure failed and file is not cached: ${err.message}`);
       }
@@ -1107,11 +1335,11 @@ async function startServer() {
         const cachedData = JSON.parse(fs.readFileSync(cachePath, "utf8"));
         console.log(`[Cache First] Serving get-files instantly from cache for: ${folder}`);
         
-        // Asynchronously refresh list in background
+        // Asynchronously refresh list in background with a larger timeout to avoid timeout warnings
         (async () => {
           try {
             const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-files?folder=${folder}&clientName=${activeClient}`;
-            const response = await robustFetchWithRetry(azureApiUrl, {}, 3500, 1, true);
+            const response = await robustFetchWithRetry(azureApiUrl, {}, 15000, 1, true);
             if (response.ok) {
               const data = await response.json();
               fs.writeFileSync(cachePath, JSON.stringify(data, null, 2), "utf8");
@@ -1143,7 +1371,7 @@ async function startServer() {
 
     try {
       const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-files?folder=${folder}&clientName=${activeClient}`;
-      const timeout = hasCache ? 3500 : 5000;
+      const timeout = hasCache ? 15000 : 20000;
       const retries = hasCache ? 1 : 2;
       
       console.log(`Fetching files from Azure API: ${azureApiUrl} (cacheStatus: ${hasCache ? "CACHED" : "MISS"})`);
@@ -1279,11 +1507,11 @@ async function startServer() {
         const cachedData = JSON.parse(fs.readFileSync(cachePath, "utf8"));
         console.log(`[Cache First] Serving images-by-model list instantly from cache for: ${folder}`);
 
-        // Asynchronously refresh list in background
+        // Asynchronously refresh list in background with a larger timeout to avoid timeout warnings
         (async () => {
           try {
             const azureApiUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-files?folder=${folder}&clientName=${activeClient}`;
-            const response = await robustFetchWithRetry(azureApiUrl, {}, 3500, 1, true);
+            const response = await robustFetchWithRetry(azureApiUrl, {}, 15000, 1, true);
             if (response.ok) {
               const data = await response.json();
               fs.writeFileSync(cachePath, JSON.stringify(data, null, 2), "utf8");
@@ -2097,6 +2325,23 @@ async function startServer() {
           res.end();
         }
       }
+    }
+  });
+
+  // NEW: Save UV Map SVG route
+  app.post("/api/save-uv-svg", (req, res) => {
+    const { svg, filename } = req.body;
+    if (!svg) return res.status(400).json({ error: "svg is required" });
+    const name = filename || "axe_uv_map.svg";
+    const safeName = path.basename(name).replace(/[^a-zA-Z0-9_.-]/g, "");
+    const targetPath = path.join(process.cwd(), safeName);
+    try {
+      fs.writeFileSync(targetPath, svg, "utf8");
+      console.log(`[UV Saver] Saved UV map to ${targetPath}`);
+      return res.json({ success: true, path: targetPath, filename: safeName });
+    } catch (err: any) {
+      console.error(`[UV Saver] Failed to save UV map:`, err);
+      return res.status(500).json({ error: err.message || "Failed to save file" });
     }
   });
 
