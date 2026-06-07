@@ -259,17 +259,25 @@ const App: React.FC = () => {
   }, [selectedId, selectedModel?.detectedMaterials.length]);
 
   useEffect(() => {
+    let active = true;
+    
+    // Clear old details immediately so we don't display stale info during loads!
+    setProductDetails(null);
+    setIsFetchingDetails(false);
+
     if (selectedModel) {
       const fetchProductDetails = async () => {
         setIsFetchingDetails(true);
         try {
           const response = await fetch(`/api/product-details?modelName=${encodeURIComponent(selectedModel.name)}&v=3`);
+          if (!active) return;
           if (response.ok) {
             const text = await response.text();
+            if (!active) return;
             if (text && text.trim().length > 0) {
               try {
                 const data = JSON.parse(text);
-                if (data) {
+                if (data && active) {
                   const result = Array.isArray(data) ? data[0] : data;
                   if (result) {
                     const apiTitle = result.productTitle || result.title || result.name || selectedModel.name;
@@ -287,36 +295,38 @@ const App: React.FC = () => {
                     const normalizedName = selectedModel.name.trim().toLowerCase();
                     setProductTitles(prev => ({ ...prev, [normalizedName]: apiTitle }));
                     
-                    setProductDetails({
-                      productId: pId,
-                      title: apiTitle,
-                      description: desc,
-                      originalTitle: apiTitle,
-                      originalDescription: desc,
-                      linkTo: result.linkTo
-                    });
-                    
-                    // Auto-open on large screens only
-                    if (window.innerWidth >= 1024) {
-                      setIsProductInfoOpen(true);
+                    if (active) {
+                      setProductDetails({
+                        productId: pId,
+                        title: apiTitle,
+                        description: desc,
+                        originalTitle: apiTitle,
+                        originalDescription: desc,
+                        linkTo: result.linkTo
+                      });
+                      
+                      // Auto-open on large screens only
+                      if (window.innerWidth >= 1024) {
+                        setIsProductInfoOpen(true);
+                      }
                     }
                   }
                 }
               } catch (parseErr) {
                 console.error('Failed to parse product details JSON:', parseErr);
-                setProductDetails(null);
+                if (active) setProductDetails(null);
               }
             } else {
-              setProductDetails(null);
+              if (active) setProductDetails(null);
             }
           } else {
-            setProductDetails(null);
+            if (active) setProductDetails(null);
           }
         } catch (error) {
           console.error('Failed to fetch product details:', error);
-          setProductDetails(null);
+          if (active) setProductDetails(null);
         } finally {
-          setIsFetchingDetails(false);
+          if (active) setIsFetchingDetails(false);
         }
       };
       fetchProductDetails();
@@ -326,6 +336,10 @@ const App: React.FC = () => {
       setIsFetchingDetails(false);
       setIsProductInfoOpen(false);
     }
+
+    return () => {
+      active = false;
+    };
   }, [selectedId, selectedModel?.name]);
 
   // Translate product info when language changes
@@ -418,6 +432,19 @@ const App: React.FC = () => {
   const [translatedParts, setTranslatedParts] = useState<Record<string, { name: string, description: string }>>({});
   const [activePart, setActivePart] = useState<{ id: string, name: string, description: string, position?: THREE.Vector3, size?: THREE.Vector3, mesh?: THREE.Mesh } | null>(null);
 
+  // Synchronously reset parts, translatedParts, and productDetails during render when selectedId changes
+  // to prevent stale parts/descriptions of the previous model from "jumping in" or flashing in the UI.
+  const [prevSelectedId, setPrevSelectedId] = useState<string | null>(null);
+  if (selectedId !== prevSelectedId) {
+    setPrevSelectedId(selectedId);
+    setModelParts([]);
+    setTranslatedParts({});
+    setProductDetails(null);
+    setActivePart(null);
+    setIsFetchingParts(false);
+    setIsFetchingDetails(false);
+  }
+
   // Translate detected meshes when no modelParts are available
   useEffect(() => {
     const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
@@ -444,9 +471,12 @@ const App: React.FC = () => {
   const modelNameForFetch = selectedModelForFetch?.name;
   
   useEffect(() => {
+    let active = true;
+
     // Reset states for the new model immediately
     setModelParts([]);
     setTranslatedParts({});
+    setIsFetchingParts(false);
     
     // We prefer fetching parts based on the specific model filename first, 
     // as it's often more unique than the readable title.
@@ -461,17 +491,19 @@ const App: React.FC = () => {
       setIsFetchingParts(true);
       try {
         const response = await fetch(`/api/model-parts?modelName=${encodeURIComponent(searchName)}`);
+        if (!active) return;
         if (!response.ok) {
           console.warn(`Server responded with ${response.status} for model parts`);
-          setIsFetchingParts(false);
+          if (active) setIsFetchingParts(false);
           return;
         }
         const text = await response.text();
+        if (!active) return;
         if (text && (text.trim().startsWith('[') || text.trim().startsWith('{'))) { 
           try {
             const data = JSON.parse(text);
             const parts = Array.isArray(data) ? data : (data.parts || []);
-            if (parts.length > 0) {
+            if (parts.length > 0 && active) {
               setModelParts(parts);
               
               // Pre-translate descriptions in the background for current language
@@ -489,6 +521,7 @@ const App: React.FC = () => {
 
                   try {
                     const translatedResults = await translateBatch(textsToTranslate, langName);
+                    if (!active) return;
                     const newTranslatedParts: Record<string, { name: string, description: string }> = {};
                     
                     let resultIdx = 0;
@@ -498,7 +531,9 @@ const App: React.FC = () => {
                       newTranslatedParts[item.id] = { name: tName, description: tDesc };
                     });
                     
-                    setTranslatedParts(newTranslatedParts);
+                    if (active) {
+                      setTranslatedParts(newTranslatedParts);
+                    }
                   } catch (err) {
                     console.error("Initial batch part translation failed:", err);
                   }
@@ -515,11 +550,15 @@ const App: React.FC = () => {
       } catch (err) {
         console.error("Failed to fetch model parts from Azure API:", err)
       } finally {
-        setIsFetchingParts(false);
+        if (active) setIsFetchingParts(false);
       }
     };
 
     fetchModelParts();
+
+    return () => {
+      active = false;
+    };
   }, [selectedId, modelNameForFetch, productDetails?.originalTitle]);
 
   useEffect(() => {
@@ -1550,6 +1589,7 @@ const App: React.FC = () => {
             ref={controlsRef} 
             makeDefault 
             enableDamping 
+            enablePan={false}
             minDistance={5} 
             maxDistance={500} 
             enabled={!isMoveMode} 
