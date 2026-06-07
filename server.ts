@@ -918,9 +918,6 @@ async function startServer() {
                 if (data) break;
               }
             }
-            if (!data && !uniqueVariations.includes("Connector")) {
-              data = await tryFetch("Connector", 4000, 1, true);
-            }
             if (data) {
               if (!fs.existsSync(productsCacheDir)) {
                 fs.mkdirSync(productsCacheDir, { recursive: true });
@@ -975,11 +972,6 @@ async function startServer() {
         }
       }
       
-      // 3. Final fallback to "Connector" only if absolutely necessary and not already tried
-      if (!data && !uniqueVariations.includes("Connector")) {
-        data = await tryFetch("Connector", 4000, 1);
-      }
-
       // If we fetched successfully, save to cache
       if (data) {
         try {
