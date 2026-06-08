@@ -22,26 +22,55 @@ const CameraHandler: React.FC<{
   const { camera } = useThree();
   useFrame(() => {
     if (controlsRef.current) {
-      if (activePartMesh) {
-        // Calculate current world position of the mesh for dynamic tracking
-        const box = new THREE.Box3().setFromObject(activePartMesh);
-        const center = new THREE.Vector3();
-        box.getCenter(center);
-        
-        // Target the center of the mesh
-        controlsRef.current.target.lerp(center, 0.02);
-        
-        // If we have a targetView, maintain the relative offset from the moving center
-        if (targetView) {
-          const offset = targetView.pos.clone().sub(targetView.lookAt);
-          const dynamicTargetPos = center.clone().add(offset);
-          camera.position.lerp(dynamicTargetPos, 0.02);
+      let trackingSucceeded = false;
+      
+      // Fully validate that the mesh is valid, loaded, and not disposed/stale
+      if (
+        activePartMesh && 
+        activePartMesh.isMesh && 
+        activePartMesh.geometry && 
+        activePartMesh.geometry.attributes && 
+        activePartMesh.geometry.attributes.position &&
+        activePartMesh.parent
+      ) {
+        try {
+          // Calculate current world position of the mesh for dynamic tracking
+          const box = new THREE.Box3();
+          box.setFromObject(activePartMesh);
+          const center = new THREE.Vector3();
+          box.getCenter(center);
+          
+          // Target the center of the mesh
+          controlsRef.current.target.lerp(center, 0.02);
+          
+          // If we have a targetView, maintain the relative offset from the moving center
+          if (targetView) {
+            const offset = targetView.pos.clone().sub(targetView.lookAt);
+            const dynamicTargetPos = center.clone().add(offset);
+            camera.position.lerp(dynamicTargetPos, 0.02);
+          }
+          
+          trackingSucceeded = true;
+        } catch (err) {
+          console.warn("[CameraHandler] Failed to calculate dynamic tracking for activePartMesh:", err);
         }
-      } else if (targetView) {
-        camera.position.lerp(targetView.pos, 0.02);
-        controlsRef.current.target.lerp(targetView.lookAt, 0.02);
       }
-      controlsRef.current.update();
+
+      // Fallback if no active part tracking is active or if tracking failed/mesh is stale
+      if (!trackingSucceeded && targetView) {
+        try {
+          camera.position.lerp(targetView.pos, 0.02);
+          controlsRef.current.target.lerp(targetView.lookAt, 0.02);
+        } catch (err) {
+          console.warn("[CameraHandler] Failed to lerp targetView:", err);
+        }
+      }
+
+      try {
+        controlsRef.current.update();
+      } catch (err) {
+        console.warn("[CameraHandler] Failed to update controls:", err);
+      }
     }
   });
   return null;
@@ -1509,7 +1538,7 @@ const App: React.FC = () => {
           }}
           className="relative z-20"
           style={{ background: 'transparent' }}
-          onPointerDown={() => { if (isMoveMode) setIsMoveMode(false); setTargetView(null); setActivePart(null); stopSpeaking(); }}
+          onPointerDown={() => { if (isMoveMode) setIsMoveMode(false); setTargetView(null); }}
         >
           <PerspectiveCamera makeDefault position={isMobile ? [0, 40, 180] : [0, 30, 120]} fov={35} near={0.1} far={2000} />
           <CameraHandler targetView={targetView} controlsRef={controlsRef} activePartMesh={activePart?.mesh} />
@@ -1598,60 +1627,48 @@ const App: React.FC = () => {
         </Canvas>
 
         {/* COLOR VARIANTS - BOTTOM CENTER */}
-        {selectedModel && (relevantVariants.length > 1 || activePart) && (
+        {selectedModel && relevantVariants.length > 1 && (
           <div className="absolute bottom-24 sm:bottom-14 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar">
-            {relevantVariants.length > 1 ? (
-              <>
-                <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
-                  <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
-                    {activePart ? activePart.name : t.variant}
-                  </span>
-                  <span className="text-[10px] sm:text-[12px] font-black text-zinc-800 uppercase tracking-tight truncate max-w-[60px] sm:max-w-none">
-                    {selectedModel.settings.activeVariant || t.default}
-                  </span>
-                </div>
-                <div className="h-6 sm:h-8 w-[1px] bg-black/5 mr-1 sm:mr-2 shrink-0"></div>
-                <div className="flex items-center gap-2 sm:gap-3">
-                  {relevantVariants.map((variant) => (
-                    <button
-                      key={variant.name}
-                      onClick={() => handleSwitchVariant(variant.name)}
-                      className={`group relative w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-all duration-500 shrink-0 ${
-                        selectedModel.settings.activeVariant === variant.name 
-                        ? 'scale-110 sm:scale-125 shadow-xl ring-4 ring-yellow-500/20' 
-                        : 'hover:scale-110'
-                      }`}
-                      title={variant.name}
-                    >
-                      <div 
-                        className="absolute inset-0 rounded-full border-2 border-white shadow-inner overflow-hidden"
-                        style={{ backgroundColor: getColorFromName(variant.name) }}
-                      >
-                        {activeMaterialName && variant.mappings[activeMaterialName] && (
-                          <img 
-                            src={variant.mappings[activeMaterialName]} 
-                            className="w-full h-full object-cover" 
-                            referrerPolicy="no-referrer"
-                            alt={variant.name}
-                          />
-                        )}
-                      </div>
-                      {selectedModel.settings.activeVariant === variant.name && (
-                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-yellow-500 rounded-full"></div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className="flex items-center gap-4">
-                {activePart && (
-                   <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
-                     {activePart.name}
-                   </div>
-                )}
-              </div>
-            )}
+            <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
+              <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
+                {activePart ? activePart.name : t.variant}
+              </span>
+              <span className="text-[10px] sm:text-[12px] font-black text-zinc-800 uppercase tracking-tight truncate max-w-[60px] sm:max-w-none">
+                {selectedModel.settings.activeVariant || t.default}
+              </span>
+            </div>
+            <div className="h-6 sm:h-8 w-[1px] bg-black/5 mr-1 sm:mr-2 shrink-0"></div>
+            <div className="flex items-center gap-2 sm:gap-3">
+              {relevantVariants.map((variant) => (
+                <button
+                  key={variant.name}
+                  onClick={() => handleSwitchVariant(variant.name)}
+                  className={`group relative w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-all duration-500 shrink-0 ${
+                    selectedModel.settings.activeVariant === variant.name 
+                    ? 'scale-110 sm:scale-125 shadow-xl ring-4 ring-yellow-500/20' 
+                    : 'hover:scale-110'
+                  }`}
+                  title={variant.name}
+                >
+                  <div 
+                    className="absolute inset-0 rounded-full border-2 border-white shadow-inner overflow-hidden"
+                    style={{ backgroundColor: getColorFromName(variant.name) }}
+                  >
+                    {activeMaterialName && variant.mappings[activeMaterialName] && (
+                      <img 
+                        src={variant.mappings[activeMaterialName]} 
+                        className="w-full h-full object-cover" 
+                        referrerPolicy="no-referrer"
+                        alt={variant.name}
+                      />
+                    )}
+                  </div>
+                  {selectedModel.settings.activeVariant === variant.name && (
+                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-yellow-500 rounded-full"></div>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1983,51 +2000,6 @@ const App: React.FC = () => {
               <p className="text-xs sm:text-sm text-zinc-600 leading-relaxed font-medium">
                 {activePart.description || t.noDescription}
               </p>
-              
-              {activePart.mesh?.name && partUVMaps[activePart.mesh.name] && (() => {
-                const uvData = partUVMaps[activePart.mesh.name];
-                const labels = {
-                  en: { inspect: "Inspect UV Map", download: "Download UV" },
-                  he: { inspect: "הצג מפת UV", download: "הורד מפת UV" },
-                  ar: { inspect: "معاينة UV", download: "تحميل UV" },
-                  ru: { inspect: "Посмотреть UV", download: "Скачать UV" }
-                }[language] || { inspect: "Inspect UV Map", download: "Download UV" };
-
-                return (
-                  <div className="mt-4 pt-3 border-t border-zinc-100 flex flex-col gap-2 shrink-0">
-                    <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-400">UV WIREFRAME GRID</span>
-                    
-                    {/* Micro UV Inline Vector SVG Render Map */}
-                    <div 
-                      onClick={() => setInspectedUVPart({ name: activePart.name, svg: uvData.svg, filename: uvData.filename })}
-                      className="w-full h-24 bg-stone-950 border border-zinc-200/50 rounded-xl overflow-hidden relative cursor-pointer group hover:border-yellow-500 transition-all duration-300"
-                    >
-                      <div 
-                        className="w-full h-full p-2 opacity-80 group-hover:opacity-100 transition-opacity flex items-center justify-center [&_svg]:max-w-full [&_svg]:max-h-full [&_text]:hidden"
-                        dangerouslySetInnerHTML={{ __html: uvData.svg }}
-                      />
-                      <div className="absolute inset-0 bg-stone-900/40 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-300">
-                        <span className="bg-white/95 text-stone-900 text-[10px] font-black tracking-wide uppercase px-3 py-1.5 rounded-full shadow-lg border border-black/5">
-                          {labels.inspect}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex">
-                      <button
-                        onClick={() => setInspectedUVPart({ name: activePart.name, svg: uvData.svg, filename: uvData.filename })}
-                        className="flex-1 py-1.5 px-3 bg-yellow-500 hover:bg-yellow-600 text-white font-black text-[10px] tracking-wide uppercase rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                        {labels.inspect}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
             </div>
           </div>
         )}

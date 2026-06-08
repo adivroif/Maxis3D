@@ -1170,8 +1170,18 @@ async function startServer() {
       return res.sendFile(path.resolve(localFilePath));
     }
 
-    // Step 3: Call Azure since we had a cache miss (requesting targetFileName)
-    const azureFileUrl = `https://fbx-studio-bnecb0euepare0ew.westeurope-01.azurewebsites.net/api/files/get-file?folder=${folder}&fileName=${encodeURIComponent(targetFileName)}&clientName=${activeClient}`;
+    // Step 3: Call R2 directly via static file path since we had a cache miss (requesting targetFileName)
+    let r2Path = "";
+    if (folder.startsWith("tenants")) {
+      if (folder.includes("/")) {
+        r2Path = `${folder}/${targetFileName}`;
+      } else {
+        r2Path = `tenants/${activeClient}/${targetFileName}`;
+      }
+    } else {
+      r2Path = `${folder}/${targetFileName}`;
+    }
+    const azureFileUrl = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/${r2Path}`;
     try {
       console.log(`[Proxy] Resilient request for ${folder}/${targetFileName} (original: ${fileName}). URL: ${azureFileUrl} (cacheStatus: MISS)`);
       

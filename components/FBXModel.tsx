@@ -806,7 +806,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
   // Clean up and dispose all loaded textures on unmount to prevent GPU memory leaks and WebGL context crashes
   useEffect(() => {
     return () => {
-      console.log("[FBXModel] 🧹 Disposing cached textures to free GPU memory...");
+      console.log("[FBXModel] 🧹 Disposing cached custom PBR textures to free GPU memory...");
       const cache = textureCacheRef.current;
       if (cache) {
         Object.values(cache).forEach((tex) => {
