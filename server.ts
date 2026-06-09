@@ -1311,22 +1311,27 @@ async function startServer() {
       return handleGetFileResiliently(folder as string, fileName as string, clientName as string, res);
     }
 
-    const activeClient = clientName || "tenantA";
-    const cachePath = getLocalCachedListPath(folder as string, activeClient as string);
+    const activeClient = (clientName as string) || "tenantA";
+    const cachePath = getLocalCachedListPath(folder as string, activeClient);
     const hasCache = fs.existsSync(cachePath);
 
-    // Helper to rewrite Azure URLs to local proxy
+    // Helper to rewrite Azure/API URLs to direct R2 for images/textures, and proxy for others
     const rewriteItem = (item: any) => {
       if (typeof item === 'string') return item;
       const fileNameStr = item.fileName || item.FileName || item.name || item.Name || "";
       if (fileNameStr) {
         const effectiveFolder = folder as string;
-        const proxyUrl = `/api/files/get-file?folder=${encodeURIComponent(effectiveFolder)}&fileName=${encodeURIComponent(fileNameStr)}&clientName=${encodeURIComponent(activeClient as string)}`;
+        let finalUrl = "";
+        if (effectiveFolder === "images" || effectiveFolder.toLowerCase().includes("image")) {
+          finalUrl = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(fileNameStr)}`;
+        } else {
+          finalUrl = `/api/files/get-file?folder=${encodeURIComponent(effectiveFolder)}&clientName=${encodeURIComponent(activeClient)}&fileName=${encodeURIComponent(fileNameStr)}`;
+        }
         
         return {
           ...item,
-          url: proxyUrl,
-          Url: proxyUrl
+          url: finalUrl,
+          Url: finalUrl
         };
       }
       return item;
@@ -1484,19 +1489,24 @@ async function startServer() {
       return !isAlphanumeric;
     };
 
-    // Helper to rewrite Azure URLs to local proxy
+    // Helper to rewrite Azure/API URLs to direct R2 for images/textures, and proxy for others
     const rewriteItem = (item: any) => {
       if (typeof item === 'string') return item;
       const fileName = item.fileName || item.FileName || item.name || item.Name || "";
       if (fileName) {
         const effectiveFolder = folder as string;
-        const proxyUrl = `/api/files/get-file?folder=${encodeURIComponent(effectiveFolder)}&clientName=${encodeURIComponent(activeClient)}&fileName=${encodeURIComponent(fileName)}`;
+        let finalUrl = "";
+        if (effectiveFolder === "images" || effectiveFolder.toLowerCase().includes("image")) {
+          finalUrl = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(fileName)}`;
+        } else {
+          finalUrl = `/api/files/get-file?folder=${encodeURIComponent(effectiveFolder)}&clientName=${encodeURIComponent(activeClient)}&fileName=${encodeURIComponent(fileName)}`;
+        }
         
         return {
           ...item,
           FileName: fileName,
-          url: proxyUrl,
-          Url: proxyUrl
+          url: finalUrl,
+          Url: finalUrl
         };
       }
       return item;
@@ -2214,10 +2224,16 @@ async function startServer() {
 
   // Proxy route to fetch files from R2 and serve them from our domain (bypasses CORS)
   app.get("/api/r2/proxy", async (req, res) => {
-    const key = req.query.key as string;
+    let key = req.query.key as string;
     if (!key) return res.status(400).send("Key is required");
 
     try {
+      try {
+        key = decodeURIComponent(key);
+      } catch (e) {
+        console.warn("Failed to decode proxy key, using raw", e);
+      }
+
       const bucket = process.env.R2_BUCKET_NAME;
       if (!bucket) throw new Error("R2_BUCKET_NAME is not configured");
 

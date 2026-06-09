@@ -5,7 +5,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera, Environment, Float, Html, Center } from '@react-three/drei';
 import * as THREE from 'three';
 import './types';
-import FBXModel from './components/FBXModel';
+import FBXModel, { generateSingleMeshUVSVG } from './components/FBXModel';
 import { ModelErrorBoundary } from './components/ModelErrorBoundary';
 import Sidebar from './components/Sidebar';
 import CameraControls from './components/CameraControls';
@@ -227,7 +227,11 @@ const App: React.FC = () => {
               if (typeof item === 'string') return { key: item, name: item, url: item };
               const name = item.fileName || item.FileName || item.filename || item.Name || item.name || "";
               const key = item.fullPath || item.FullPath || item.fullpath || item.Key || item.item_key || item.key || name || "";
-              const url = `/api/files/get-file?folder=tenants&clientName=tenantA&fileName=${encodeURIComponent(name)}&v=3`;
+              // Models (.fbx) must load through proxy instead of direct R2 as R2 fetches fail for them
+              const itemUrl = item.url || item.Url || "";
+              const url = (itemUrl && !itemUrl.includes("pub-")) 
+                ? itemUrl 
+                : `/api/files/get-file?folder=tenants&clientName=tenantA&fileName=${encodeURIComponent(name)}`;
               return { key, name, url };
             })
             .filter((f: any) => f.name.toLowerCase().endsWith(".fbx") || f.key.toLowerCase().endsWith(".fbx"));
@@ -260,7 +264,11 @@ const App: React.FC = () => {
           const extracted = list.map((item: any) => {
             const name = item.fileName || item.FileName || item.filename || item.Name || item.name || item.Title || item.title || "";
             const key = item.fullPath || item.FullPath || item.fullpath || item.Key || item.item_key || item.key || item.FilePath || name || "";
-            const url = `/api/files/get-file?folder=images&clientName=tenantA&fileName=${encodeURIComponent(name)}&v=3`;
+            // Textures/images are loaded directly from R2 public bucket path
+            const itemUrl = item.url || item.Url || "";
+            const url = (itemUrl && itemUrl.includes("pub-"))
+              ? itemUrl
+              : `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(name)}`;
             return { key, name, url };
           }).filter((f: any) => {
             const lowName = f.name.toLowerCase();
@@ -1427,7 +1435,7 @@ const App: React.FC = () => {
       <div 
         className={`fixed inset-0 pointer-events-none z-[-1] flex items-center justify-center transition-all duration-1000 ${isNightMode ? 'opacity-[0.6] brightness-[300%]' : 'opacity-[0.08]'}`}
         style={{
-          backgroundImage: 'url(/api/files/get-file?folder=images&fileName=wallpaper_customer_maxis.png)',
+          backgroundImage: 'url(https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/wallpaper_customer_maxis.png)',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
           backgroundSize: '70%',
@@ -1443,7 +1451,7 @@ const App: React.FC = () => {
           className="w-12 h-12 sm:w-16 sm:h-16 bg-white/80 backdrop-blur-xl rounded-xl sm:rounded-2xl border border-black/5 shadow-2xl overflow-hidden flex items-center justify-center pointer-events-auto transition-transform hover:scale-105 active:scale-95"
         >
           <img 
-            src="/api/files/get-file?folder=images&fileName=wallpaper_customer_maxis_only_logo.png" 
+            src="https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/wallpaper_customer_maxis_only_logo.png" 
             alt="Customer Logo" 
             className="w-full h-full object-contain p-2"
             referrerPolicy="no-referrer"
@@ -1475,35 +1483,63 @@ const App: React.FC = () => {
 
           {/* Settings Dropdown Menu */}
           {isSettingsOpen && (
-            <div className="absolute top-full mt-2 flex flex-col gap-2 p-2 bg-white/90 backdrop-blur-xl rounded-2xl border border-black/5 shadow-2xl animate-in fade-in zoom-in-95 duration-200 right-0">
-              {/* Day/Night Mode */}
-              <button 
-                onClick={() => setIsNightMode(!isNightMode)}
-                className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-black/5 flex items-center justify-center transition-all group ${isNightMode ? 'bg-zinc-800 text-yellow-400' : 'bg-white text-zinc-400 hover:text-yellow-500'}`}
-                title={isNightMode ? t.dayMode : t.nightMode}
-              >
-                {isNightMode ? (
-                  <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-11.314l.707.707m11.314 11.314l.707.707M12 5a7 7 0 100 14 7 7 0 000-14z" />
+            <div 
+              className={`absolute top-full mt-2 w-72 sm:w-80 flex flex-col gap-4 p-5 bg-white/95 backdrop-blur-2xl rounded-3xl border border-zinc-200/80 shadow-[0_20px_50px_rgba(0,0,0,0.15)] animate-in fade-in zoom-in-95 duration-200 right-0 z-[1000]`}
+              dir={isRTL ? 'rtl' : 'ltr'}
+            >
+              <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+                <span className="text-xs font-black uppercase tracking-wider text-zinc-500">
+                  {t.settings}
+                </span>
+                {/* Close/Toggle Settings */}
+                <button 
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="text-zinc-400 hover:text-zinc-600 p-0.5"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
                   </svg>
-                ) : (
-                  <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                  </svg>
-                )}
-              </button>
+                </button>
+              </div>
 
-              {/* Language Selector */}
-              <div className="flex flex-col gap-1 bg-zinc-50 p-1 rounded-xl border border-black/5">
-                {(['en', 'he', 'ar', 'ru'] as Language[]).map((lang) => (
-                  <button
-                    key={lang}
-                    onClick={() => setLanguage(lang)}
-                    className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center text-[10px] font-black uppercase transition-all ${language === lang ? 'bg-yellow-500 text-white shadow-lg' : 'text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800'}`}
-                  >
-                    {lang}
-                  </button>
-                ))}
+              {/* Day/Night Theme Switcher */}
+              <div className="flex items-center justify-between gap-3 bg-zinc-50/50 p-2 rounded-2xl border border-black/5">
+                <span className="text-xs font-bold text-zinc-600">
+                  {isNightMode ? t.dayMode : t.nightMode}
+                </span>
+                <button 
+                  onClick={() => setIsNightMode(!isNightMode)}
+                  className={`w-10 h-10 rounded-xl border border-black/5 flex items-center justify-center transition-all ${isNightMode ? 'bg-zinc-800 text-yellow-400' : 'bg-white text-zinc-400 hover:text-yellow-500 hover:shadow-sm'}`}
+                  title={isNightMode ? t.dayMode : t.nightMode}
+                >
+                  {isNightMode ? (
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-11.314l.707.707m11.314 11.314l.707.707M12 5a7 7 0 100 14 7 7 0 000-14z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+
+              {/* Language Code Selector */}
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 leading-none">
+                  {language === 'he' ? 'שפת ממשק' : 'Interface Language'}
+                </span>
+                <div className="grid grid-cols-4 gap-1.5 bg-zinc-50/50 p-1 rounded-xl border border-black/5">
+                  {(['en', 'he', 'ar', 'ru'] as Language[]).map((lang) => (
+                    <button
+                      key={lang}
+                      onClick={() => setLanguage(lang)}
+                      className={`h-8 rounded-lg flex items-center justify-center text-[10px] font-black uppercase transition-all ${language === lang ? 'bg-yellow-500 text-white shadow-md' : 'text-zinc-400 hover:bg-zinc-100/80 hover:text-zinc-800'}`}
+                    >
+                      {lang}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -1568,9 +1604,10 @@ const App: React.FC = () => {
                   language={language}
                   onRetry={() => {
                     console.log(`[ErrorBoundary Option] Retrying model load for: ${model.name}`);
-                    const freshUrl = model.url.includes('&v=')
-                      ? model.url.replace(/&v=\d+/, `&v=${Date.now()}`)
-                      : `${model.url}&v=${Date.now()}`;
+                    const hasQuery = model.url.includes('?');
+                    const freshUrl = model.url.includes('v=')
+                      ? model.url.replace(/([?&])v=\d+/, `$1v=${Date.now()}`)
+                      : `${model.url}${hasQuery ? '&' : '?'}v=${Date.now()}`;
                     updateModelData(model.id, { url: freshUrl });
                   }}
                 >
@@ -2000,6 +2037,30 @@ const App: React.FC = () => {
               <p className="text-xs sm:text-sm text-zinc-600 leading-relaxed font-medium">
                 {activePart.description || t.noDescription}
               </p>
+
+              {activePart.mesh && (
+                <button
+                  onClick={() => {
+                    if (activePart.mesh) {
+                      const svg = generateSingleMeshUVSVG(activePart.mesh);
+                      if (svg) {
+                        const cleanMeshName = activePart.mesh.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+                        setInspectedUVPart({
+                          name: activePart.name,
+                          svg: svg,
+                          filename: `${selectedModel?.name || 'model'}_part_${cleanMeshName}_uv_layout.svg`
+                        });
+                      }
+                    }
+                  }}
+                  className="mt-4 flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-600 hover:from-blue-100 hover:to-indigo-100 font-extrabold text-[11px] sm:text-xs transition-all border border-blue-100/50 hover:border-blue-200/50 shadow-sm cursor-pointer"
+                >
+                  <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  {language === 'he' ? 'הצג קואורדינטות UV לחלק זה' : 'Inspect Mesh UV Map'}
+                </button>
+              )}
             </div>
           </div>
         )}

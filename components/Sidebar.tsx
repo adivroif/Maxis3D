@@ -79,6 +79,79 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   });
 
+  const uploadTranslations = {
+    en: {
+      uploadTitle: "Upload Custom Model",
+      uploadDesc: "Drag & drop your FBX file here, or click to browse",
+      activeModel: "Active Loaded Model",
+      removeModel: "Remove Model",
+      onlyFBX: "Only .fbx format is supported",
+    },
+    he: {
+      uploadTitle: "העלאת מודל אישי",
+      uploadDesc: "גרור ושחרר קובץ FBX כאן, או לחץ לבחירת קובץ",
+      activeModel: "מודל אישי טעון",
+      removeModel: "הסר מודל",
+      onlyFBX: "רק קבצי .fbx נתמכים במערכת",
+    },
+    ar: {
+      uploadTitle: "تحميل نموذج مخصص",
+      uploadDesc: "اسحب وأسقط ملف FBX هنا، أو انقر للتصفح",
+      activeModel: "النموذج النشط",
+      removeModel: "إزالة النموذج",
+      onlyFBX: "صيغة .fbx فقط مدعومة",
+    },
+    ru: {
+      uploadTitle: "Загрузить свою модель",
+      uploadDesc: "Перетащите файл FBX сюда или нажмите для выбора",
+      activeModel: "Активная модель",
+      removeModel: "Удалить модель",
+      onlyFBX: "Поддерживается только формат .fbx",
+    }
+  };
+
+  const ut = uploadTranslations[language] || uploadTranslations['en'];
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [uploadError, setUploadError] = React.useState<string | null>(null);
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    setUploadError(null);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.name.toLowerCase().endsWith('.fbx')) {
+        onAddFile(file);
+      } else {
+        setUploadError(ut.onlyFBX);
+        setTimeout(() => setUploadError(null), 5000);
+      }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUploadError(null);
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      if (file.name.toLowerCase().endsWith('.fbx')) {
+        onAddFile(file);
+      } else {
+        setUploadError(ut.onlyFBX);
+        setTimeout(() => setUploadError(null), 5000);
+      }
+    }
+  };
+
   const toggleLike = async (e: React.MouseEvent, productName: string) => {
     e.stopPropagation();
     const normalizedName = productName.trim().toLowerCase();
@@ -260,7 +333,20 @@ const Sidebar: React.FC<SidebarProps> = ({
         if (typeof item === 'string') return { key: item, name: item, url: item };
         const name = item.fileName || item.FileName || item.filename || item.Name || item.name || item.Title || item.title || "";
         const key = item.fullPath || item.FullPath || item.fullpath || item.Key || item.item_key || item.key || item.FilePath || name || "";
-        const url = `/api/files/get-file?folder=${encodeURIComponent(sourceFolder)}&clientName=tenantA&fileName=${encodeURIComponent(name)}&v=3`;
+        
+        let url = item.url || item.Url || "";
+        if (!url) {
+          if (sourceFolder === "images" || sourceFolder.toLowerCase().includes("image")) {
+            url = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(name)}`;
+          } else {
+            url = `/api/files/get-file?folder=${encodeURIComponent(sourceFolder)}&clientName=tenantA&fileName=${encodeURIComponent(name)}&v=3`;
+          }
+        } else if (sourceFolder === "images" || sourceFolder.toLowerCase().includes("image")) {
+          // Force textures to use R2 domain
+          if (!url.includes("pub-")) {
+            url = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(name)}`;
+          }
+        }
         return { key, name, url };
       };
 

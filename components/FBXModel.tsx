@@ -301,7 +301,7 @@ function resolveBestSet(
  * Generates an elegant and high-fidelity SVG file showing the combined UDIM UV layouts
  * of all meshes in the FBX model, color-coded by mesh.
  */
-function generateUVSVG(group: THREE.Object3D): string {
+export function generateUVSVG(group: THREE.Object3D): string {
   const meshes: THREE.Mesh[] = [];
   group.traverse((child) => {
     if ((child as THREE.Mesh).isMesh) {
@@ -439,7 +439,7 @@ function generateUVSVG(group: THREE.Object3D): string {
  * Generates an elegant and high-fidelity SVG file showing the UV layout of a SINGLE mesh,
  * fully isolated with zero overlaps from other meshes.
  */
-function generateSingleMeshUVSVG(mesh: THREE.Mesh): string {
+export function generateSingleMeshUVSVG(mesh: THREE.Mesh): string {
   const geometry = mesh.geometry;
   if (!geometry || !geometry.attributes || !geometry.attributes.uv) return '';
   const uvAttr = geometry.attributes.uv as THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
@@ -628,12 +628,14 @@ const FBXModel: React.FC<FBXModelProps> = ({
     return clone;
   }, [originalFbx]);
 
-  const mixer = useMemo(() => new THREE.AnimationMixer(fbx), [fbx]);
+  const mixer = useMemo(() => fbx ? new THREE.AnimationMixer(fbx) : null, [fbx]);
   const actions = useMemo(() => {
     const res: { [key: string]: THREE.AnimationAction } = {};
-    if (fbx.animations) fbx.animations.forEach(clip => { res[clip.name] = mixer.clipAction(clip); });
+    if (fbx && fbx.animations && mixer) {
+      fbx.animations.forEach(clip => { res[clip.name] = mixer.clipAction(clip); });
+    }
     return res;
-  }, [mixer, fbx.animations]);
+  }, [mixer, fbx?.animations]);
 
   // ── Texture cache: url → THREE.Texture ──────────────────────────────────
   const [textureCache, setTextureCache] = useState<{ [url: string]: THREE.Texture }>({});
@@ -655,6 +657,8 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
   // ── Collect ALL texture URLs from textureSets + legacy settings ──────────
   useEffect(() => {
+    let active = true;
+
     // Use a Set to deduplicate URLs within this same effect run,
     // AND check textureCacheRef to skip already-loaded ones.
     const seen = new Set<string>();
@@ -691,70 +695,52 @@ const FBXModel: React.FC<FBXModelProps> = ({
     Object.values(settings.heightMappings || {}).forEach(u => add(u, false));
     Object.values(settings.specularMappings || {}).forEach(u => add(u, false));
 
-    console.log(`[FBXModel] 📦 Queuing ${toLoad.length} unique textures to load`);
+    console.log(`[FBXModel] 📦 Queuing ${toLoad.length} unique textures to load (sequential/batch concurrency queue)`);
 
-    toLoad.forEach(({ url: u, isColor }) => {
-      const lo = u.toLowerCase();
-      // Inspect if URL points to a TGA/DDS file (handles files served via proxy endpoints with query params)
-      let isTgaFile = false;
-      let isDdsFile = false;
+    if (toLoad.length === 0) return;
 
-      if (lo.includes('filename=')) {
-        const fileParam = lo.split('filename=')[1].split('&')[0];
-        isTgaFile = fileParam.endsWith('.tga');
-        isDdsFile = fileParam.endsWith('.dds');
-      } else {
-        isTgaFile = lo.endsWith('.tga') || lo.includes('.tga?');
-        isDdsFile = lo.endsWith('.dds') || lo.includes('.dds?');
-      }
+    // Controlled queue execution to prevent WebGL/Browser freezing under heavy parallel decode load
+    let currentIndex = 0;
+    const activeLoadsLimit = 2; // Process maximum 2 textures concurrently
 
-      if (isTgaFile || isDdsFile) {
-        let loader: any = isTgaFile ? tgaLoader.current : ddsLoader.current;
-        loader.load(u, (tex: THREE.Texture) => {
-          tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-          tex.wrapS = THREE.RepeatWrapping;
-          tex.wrapT = THREE.RepeatWrapping;
-          const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
-          tex.flipY = shouldFlipY;
-          tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
-          tex.needsUpdate = true;
-          textureCacheRef.current[u] = tex;
-          setTextureCache(prev => ({ ...prev, [u]: tex }));
-        }, undefined, (err: any) => console.error(`[FBXModel] ❌ Failed: "${u}"`, err));
-      } else {
-        // Optimized standard image loader with smart Canvas downscaling to prevent GPU Out Of Memory and WebGL context loss
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.referrerPolicy = 'no-referrer';
-        img.src = u;
-        img.onload = () => {
-          try {
-            // Cap max size according to settings or fallback to 4096 for gorgeous resolution (1024 was previously causing blurry decals)
-            const maxDim = settings.maxTextureSize !== undefined ? settings.maxTextureSize : 4096;
-            let w = img.width;
-            let h = img.height;
-            let finalSource: HTMLImageElement | HTMLCanvasElement = img;
+    const loadSingleTexture = ({ url: u, isColor }: { url: string; isColor: boolean }): Promise<void> => {
+      return new Promise<void>((resolve) => {
+        const done = () => resolve();
 
-            if (maxDim > 0 && (w > maxDim || h > maxDim)) {
-              const ratio = Math.min(maxDim / w, maxDim / h);
-              w = Math.round(w * ratio);
-              h = Math.round(h * ratio);
+        if (!active) {
+          done();
+          return;
+        }
 
-              const canvas = document.createElement('canvas');
-              canvas.width = w;
-              canvas.height = h;
-              const ctx = canvas.getContext('2d');
-              if (ctx) {
-                // Use higher quality image smoothing on canvas scale down to prevent pixelation artifacts
-                ctx.imageSmoothingEnabled = true;
-                ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(img, 0, 0, w, h);
-                finalSource = canvas;
-                console.log(`[TextureOptimizer] Downscaled ${u} from ${img.width}x${img.height} to ${w}x${h} (Cap: ${maxDim})`);
-              }
+        let loadUrl = u;
+        if (u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/')) {
+          const keyPath = u.substring('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/'.length);
+          loadUrl = `/api/r2/proxy?key=${encodeURIComponent(keyPath)}`;
+          console.log(`[FBXModel] Intercepted CORS-blocked R2 texture URL at load-time and proxied: "${u}" -> "${loadUrl}"`);
+        }
+
+        const lo = u.toLowerCase();
+        // Inspect if URL points to a TGA/DDS file (handles files served via proxy endpoints with query params)
+        let isTgaFile = false;
+        let isDdsFile = false;
+
+        if (lo.includes('filename=')) {
+          const fileParam = lo.split('filename=')[1].split('&')[0];
+          isTgaFile = fileParam.endsWith('.tga');
+          isDdsFile = fileParam.endsWith('.dds');
+        } else {
+          isTgaFile = lo.endsWith('.tga') || lo.includes('.tga?');
+          isDdsFile = lo.endsWith('.dds') || lo.includes('.dds?');
+        }
+
+        if (isTgaFile || isDdsFile) {
+          let loader: any = isTgaFile ? tgaLoader.current : ddsLoader.current;
+          loader.load(loadUrl, (tex: THREE.Texture) => {
+            if (!active) {
+              tex.dispose();
+              done();
+              return;
             }
-
-            const tex = new THREE.Texture(finalSource);
             tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
             tex.wrapS = THREE.RepeatWrapping;
             tex.wrapT = THREE.RepeatWrapping;
@@ -762,14 +748,117 @@ const FBXModel: React.FC<FBXModelProps> = ({
             tex.flipY = shouldFlipY;
             tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
             tex.needsUpdate = true;
-
             textureCacheRef.current[u] = tex;
-            setTextureCache(prev => ({ ...prev, [u]: tex }));
-          } catch (e) {
-            console.error('[TextureOptimizer] Error processing texture canvas downscaling, falling back:', e);
-            // Fallback load
+            setTextureCache(prev => {
+              if (!active) return prev;
+              return { ...prev, [u]: tex };
+            });
+            done();
+          }, undefined, (err: any) => {
+            console.error(`[FBXModel] ❌ Failed to load through proxy: "${loadUrl}" (original: "${u}")`, err);
+            done();
+          });
+        } else {
+          // Optimized standard image loader with smart Canvas downscaling to prevent GPU Out Of Memory and WebGL context loss
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.referrerPolicy = 'no-referrer';
+          img.src = loadUrl;
+          img.onload = () => {
+            if (!active) {
+              done();
+              return;
+            }
+            try {
+              // Cap max size according to settings or fallback to 4096 for gorgeous resolution (1024 was previously causing blurry decals)
+              const maxDim = settings.maxTextureSize !== undefined ? settings.maxTextureSize : 4096;
+              let w = img.width;
+              let h = img.height;
+              let finalSource: HTMLImageElement | HTMLCanvasElement = img;
+
+              if (maxDim > 0 && (w > maxDim || h > maxDim)) {
+                const ratio = Math.min(maxDim / w, maxDim / h);
+                w = Math.round(w * ratio);
+                h = Math.round(h * ratio);
+
+                const canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  // Use higher quality image smoothing on canvas scale down to prevent pixelation artifacts
+                  ctx.imageSmoothingEnabled = true;
+                  ctx.imageSmoothingQuality = 'high';
+                  ctx.drawImage(img, 0, 0, w, h);
+                  finalSource = canvas;
+                  console.log(`[TextureOptimizer] Downscaled ${loadUrl} from ${img.width}x${img.height} to ${w}x${h} (Cap: ${maxDim})`);
+                }
+              }
+
+              const tex = new THREE.Texture(finalSource);
+              tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+              tex.wrapS = THREE.RepeatWrapping;
+              tex.wrapT = THREE.RepeatWrapping;
+              const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+              tex.flipY = shouldFlipY;
+              tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
+              tex.needsUpdate = true;
+
+              textureCacheRef.current[u] = tex;
+              setTextureCache(prev => {
+                if (!active) {
+                  tex.dispose();
+                  return prev;
+                }
+                return { ...prev, [u]: tex };
+              });
+              done();
+            } catch (e) {
+              console.error('[TextureOptimizer] Error processing texture canvas downscaling, falling back:', e);
+              if (!active) {
+                done();
+                return;
+              }
+              // Fallback load
+              const fallbackLoader = new THREE.TextureLoader();
+              fallbackLoader.load(loadUrl, (tex) => {
+                if (!active) {
+                  tex.dispose();
+                  done();
+                  return;
+                }
+                tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+                tex.flipY = shouldFlipY;
+                tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
+                tex.needsUpdate = true;
+                textureCacheRef.current[u] = tex;
+                setTextureCache(prev => {
+                  if (!active) return prev;
+                  return { ...prev, [u]: tex };
+                });
+                done();
+              }, undefined, (err) => {
+                console.error(`[FBXModel] ❌ Fallback failed: "${loadUrl}" (original: "${u}")`, err);
+                done();
+              });
+            }
+          };
+          img.onerror = (err) => {
+            console.error(`[TextureOptimizer] Image load error for ${loadUrl} (original: "${u}"). Trying legacy loader as fallback:`, err);
+            if (!active) {
+              done();
+              return;
+            }
             const fallbackLoader = new THREE.TextureLoader();
-            fallbackLoader.load(u, (tex) => {
+            fallbackLoader.load(loadUrl, (tex) => {
+              if (!active) {
+                tex.dispose();
+                done();
+                return;
+              }
               tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
               tex.wrapS = THREE.RepeatWrapping;
               tex.wrapT = THREE.RepeatWrapping;
@@ -778,27 +867,37 @@ const FBXModel: React.FC<FBXModelProps> = ({
               tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
               tex.needsUpdate = true;
               textureCacheRef.current[u] = tex;
-              setTextureCache(prev => ({ ...prev, [u]: tex }));
-            }, undefined, (err) => console.error(`[FBXModel] ❌ Fallback failed: "${u}"`, err));
-          }
-        };
-        img.onerror = (err) => {
-          console.error(`[TextureOptimizer] Image load error for ${u}. Trying legacy loader as fallback:`, err);
-          const fallbackLoader = new THREE.TextureLoader();
-          fallbackLoader.load(u, (tex) => {
-            tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-            tex.wrapS = THREE.RepeatWrapping;
-            tex.wrapT = THREE.RepeatWrapping;
-            const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
-            tex.flipY = shouldFlipY;
-            tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
-            tex.needsUpdate = true;
-            textureCacheRef.current[u] = tex;
-            setTextureCache(prev => ({ ...prev, [u]: tex }));
-          }, undefined, (fallbackErr) => console.error(`[FBXModel] ❌ Fallback failed too: "${u}"`, fallbackErr));
-        };
-      }
-    });
+              setTextureCache(prev => {
+                if (!active) return prev;
+                return { ...prev, [u]: tex };
+              });
+              done();
+            }, undefined, (fallbackErr) => {
+              console.error(`[FBXModel] ❌ Fallback failed too: "${loadUrl}" (original: "${u}")`, fallbackErr);
+              done();
+            });
+          };
+        }
+      });
+    };
+
+    const runQueue = () => {
+      if (!active || currentIndex >= toLoad.length) return;
+      const nextItem = toLoad[currentIndex++];
+      loadSingleTexture(nextItem).then(() => {
+        runQueue();
+      });
+    };
+
+    // Spawn up to activeLoadsLimit concurrent queue workers
+    const initialWorkersCount = Math.min(activeLoadsLimit, toLoad.length);
+    for (let i = 0; i < initialWorkersCount; i++) {
+      runQueue();
+    }
+
+    return () => {
+      active = false;
+    };
   }, [textureSets, settings]);
 
   useEffect(() => { textureCacheRef.current = textureCache; }, [textureCache]);
@@ -937,7 +1036,8 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
   // ── useFrame: root lock + animation stepping + explosion ─────────────────
   useFrame((_, delta) => {
-    if (fbx) { fbx.position.copy(rootPos.current); fbx.rotation.copy(rootRot.current); fbx.scale.copy(rootScale.current); fbx.updateMatrixWorld(true); }
+    if (!fbx) return;
+    fbx.position.copy(rootPos.current); fbx.rotation.copy(rootRot.current); fbx.scale.copy(rootScale.current); fbx.updateMatrixWorld(true);
     if (mixer) {
       const isPlaying = settings.isPlayingAnimation;
       const isAnyRunning = Object.values(actions).some(a => a?.isRunning());
@@ -966,6 +1066,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
   // ── Material synchronisation ─────────────────────────────────────────────
   useEffect(() => {
+    if (!fbx) return;
     fbx.traverse((child) => {
       if (!(child as THREE.Mesh).isMesh) return;
       const mesh = child as THREE.Mesh;
@@ -1180,6 +1281,9 @@ const FBXModel: React.FC<FBXModelProps> = ({
   const [meshNames, setMeshNames] = useState<string[]>([]);
 
   const { scaleFactor, centeringOffset, names, meshes } = useMemo(() => {
+    if (!fbx) {
+      return { scaleFactor: 1, centeringOffset: [0, 0, 0] as [number, number, number], names: [], meshes: [] };
+    }
     fbx.position.set(0,0,0); fbx.rotation.set(0,0,0); fbx.scale.setScalar(1); fbx.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(fbx);
     const size = new THREE.Vector3(); box.getSize(size);
@@ -1225,6 +1329,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
   // ── Hotspots ──────────────────────────────────────────────────────────────
   const hotspots = useMemo(() => {
+    if (!fbx) return [];
     const detected: { id: string, mesh: THREE.Mesh, description: string, name: string }[] = [];
     fbx.updateMatrixWorld(true);
     const modelBox = new THREE.Box3().setFromObject(fbx);
@@ -1266,7 +1371,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
   useEffect(() => {
     setMaterialNames(names);
     setMeshNames(meshes);
-    if (onAnimationsDetectedRef.current) onAnimationsDetectedRef.current(fbx.animations && fbx.animations.length > 0);
+    if (onAnimationsDetectedRef.current) onAnimationsDetectedRef.current(fbx && fbx.animations && fbx.animations.length > 0);
   }, [fbx, names, meshes]);
 
   useEffect(() => {
@@ -1281,26 +1386,13 @@ const FBXModel: React.FC<FBXModelProps> = ({
     }
   }, [meshNames]);
 
-  // NEW: Automatically generate and save UV layout SVG vector file on disk for each mesh sequentially
+  // NEW: Automatically generate reference combined UV layout map once on load without heavy isolated files
   useEffect(() => {
     if (!fbx) return;
     
     let isCancelled = false;
     
-    const runSequentialUVSave = async () => {
-      // 1. Gather all meshes
-      const meshes: THREE.Mesh[] = [];
-      fbx.traverse((child) => {
-        if ((child as THREE.Mesh).isMesh) {
-          meshes.push(child as THREE.Mesh);
-        }
-      });
-
-      if (meshes.length === 0) return;
-
-      console.log(`[UV Auto-Saver] Starting sequential UV layout auto-saver for ${meshes.length} parts...`);
-
-      // 2. Generate and save the combined model map as a base/reference
+    const generateAndSaveCombinedMap = async () => {
       try {
         const combinedSvg = generateUVSVG(fbx);
         if (combinedSvg && !isCancelled) {
@@ -1325,90 +1417,27 @@ const FBXModel: React.FC<FBXModelProps> = ({
             onUVLayoutGeneratedRef.current(combinedSvg, combinedFilename);
           }
 
-          console.log(`[UV Auto-Saver] Saving combined model UV layout sequentially: ${combinedFilename}`);
+          console.log(`[UV Auto-Saver] Saving combined model UV layout: ${combinedFilename}`);
           await fetch('/api/save-uv-svg', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ svg: combinedSvg, filename: combinedFilename })
-          })
-          .then(async res => {
-            if (!res.ok) {
-              const text = await res.text();
-              throw new Error(`Server responded with ${res.status}: ${text}`);
-            }
-            return res.json();
           })
           .catch(err => console.warn(`[UV Auto-Saver] Error saving combined:`, err));
         }
       } catch (err) {
         console.warn(`[UV Auto-Saver] Error generating combined UV map:`, err);
       }
-
-      // 3. Process each mesh sequentially (one by one, NOT in parallel!)
-      for (let i = 0; i < meshes.length; i++) {
-        if (isCancelled) break;
-        const mesh = meshes[i];
-        try {
-          const svg = generateSingleMeshUVSVG(mesh);
-          if (!svg) continue;
-
-          let lastPart = url.split('/').pop() || '';
-          if (lastPart.includes('?')) {
-            try {
-              const searchParams = new URLSearchParams(lastPart.split('?')[1]);
-              const qFileName = searchParams.get('fileName') || searchParams.get('filename');
-              if (qFileName) {
-                lastPart = qFileName;
-              } else {
-                lastPart = lastPart.split('?')[0];
-              }
-            } catch (e) {
-              lastPart = lastPart.split('?')[0];
-            }
-          }
-          const baseName = lastPart.toLowerCase().replace(/\.fbx$/i, '');
-          const meshCleanName = mesh.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-          const partFilename = `${baseName}_part_${meshCleanName}_uv_layout.svg`;
-
-          if (onPartUVLayoutGeneratedRef.current && !isCancelled) {
-            onPartUVLayoutGeneratedRef.current(mesh.name, svg, partFilename);
-          }
-
-          console.log(`[UV Auto-Saver] [Part ${i+1}/${meshes.length}] Saving isolated UV layout for part mesh: ${mesh.name} -> ${partFilename}`);
-          
-          await fetch('/api/save-uv-svg', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ svg, filename: partFilename })
-          })
-          .then(async res => {
-            if (!res.ok) {
-              const text = await res.text();
-              throw new Error(`Server responded with ${res.status}: ${text}`);
-            }
-            return res.json();
-          })
-          .then(() => {
-            console.log(`[UV Auto-Saver] [Part ${i+1}/${meshes.length}] Successfully saved isolated UV map to workspace as ${partFilename}`);
-          })
-          .catch(err => {
-            console.warn(`[UV Auto-Saver] [Part ${mesh.name}] Server communication error:`, err.message || err);
-          });
-
-          // A small artificial delay to avoid hammering the local server
-          await new Promise(resolve => setTimeout(resolve, 80));
-        } catch (err) {
-          console.warn(`[UV Auto-Saver] [Part ${mesh.name}] Failed to generate/save UV layout:`, err);
-        }
-      }
-      
-      console.log(`[UV Auto-Saver] Completed sequential UV layout auto-saver.`);
     };
 
-    runSequentialUVSave();
+    // Run combined map generation after a brief delay to let materials render first
+    const timer = setTimeout(() => {
+      generateAndSaveCombinedMap();
+    }, 1500);
 
     return () => {
       isCancelled = true;
+      clearTimeout(timer);
     };
   }, [fbx, url]);
 
@@ -1428,6 +1457,8 @@ const FBXModel: React.FC<FBXModelProps> = ({
       }
     }
   }, [settings.targetPartId, hotspots, onPartClick, scaleFactor, centeringOffset, activePartId]);
+
+  if (!fbx) return null;
 
   return (
     <group position={centeringOffset} scale={scaleFactor}>
