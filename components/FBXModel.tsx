@@ -701,7 +701,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
     // Controlled queue execution to prevent WebGL/Browser freezing under heavy parallel decode load
     let currentIndex = 0;
-    const activeLoadsLimit = 2; // Process maximum 2 textures concurrently
+    const activeLoadsLimit = 6; // Process up to 6 textures concurrently to speed up loading and match browser network pipelines
 
     const loadSingleTexture = ({ url: u, isColor }: { url: string; isColor: boolean }): Promise<void> => {
       return new Promise<void>((resolve) => {
@@ -713,11 +713,15 @@ const FBXModel: React.FC<FBXModelProps> = ({
         }
 
         let loadUrl = u;
-        if (u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/')) {
-          const keyPath = u.substring('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/'.length);
-          loadUrl = `/api/r2/proxy?key=${encodeURIComponent(keyPath)}`;
-          console.log(`[FBXModel] Intercepted CORS-blocked R2 texture URL at load-time and proxied: "${u}" -> "${loadUrl}"`);
-        }
+if (u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/')) {
+  const keyPath = decodeURIComponent(
+    u.substring(
+      'https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/'.length
+    )
+  );
+
+  loadUrl = `/api/r2/proxy?key=${encodeURIComponent(keyPath)}`;
+}
 
         const lo = u.toLowerCase();
         // Inspect if URL points to a TGA/DDS file (handles files served via proxy endpoints with query params)
@@ -735,42 +739,59 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
         if (isTgaFile || isDdsFile) {
           let loader: any = isTgaFile ? tgaLoader.current : ddsLoader.current;
-          loader.load(loadUrl, (tex: THREE.Texture) => {
-            if (!active) {
-              tex.dispose();
+          let triedDirect = u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/');
+          let currentLoadUrl = triedDirect ? u : loadUrl;
+
+          const executeLoad = (targetUrl: string) => {
+            loader.load(targetUrl, (tex: THREE.Texture) => {
+              if (!active) {
+                tex.dispose();
+                done();
+                return;
+              }
+              tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+              tex.wrapS = THREE.RepeatWrapping;
+              tex.wrapT = THREE.RepeatWrapping;
+              const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+              tex.flipY = shouldFlipY;
+              tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
+              tex.needsUpdate = true;
+              textureCacheRef.current[u] = tex;
+              setTextureCache(prev => {
+                if (!active) return prev;
+                return { ...prev, [u]: tex };
+              });
               done();
-              return;
-            }
-            tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-            tex.wrapS = THREE.RepeatWrapping;
-            tex.wrapT = THREE.RepeatWrapping;
-            const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
-            tex.flipY = shouldFlipY;
-            tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
-            tex.needsUpdate = true;
-            textureCacheRef.current[u] = tex;
-            setTextureCache(prev => {
-              if (!active) return prev;
-              return { ...prev, [u]: tex };
+            }, undefined, (err: any) => {
+              if (triedDirect) {
+                console.warn(`[FBXModel] Direct R2 load failed for ${u}. Retrying via proxy: ${loadUrl}`);
+                triedDirect = false;
+                executeLoad(loadUrl);
+              } else {
+                console.error(`[FBXModel] ❌ Failed to load TGA/DDS file: "${loadUrl}"`, err);
+                done();
+              }
             });
-            done();
-          }, undefined, (err: any) => {
-            console.error(`[FBXModel] ❌ Failed to load through proxy: "${loadUrl}" (original: "${u}")`, err);
-            done();
-          });
+          };
+
+          executeLoad(currentLoadUrl);
         } else {
-          // Optimized standard image loader with smart Canvas downscaling to prevent GPU Out Of Memory and WebGL context loss
+          // Optimized standard image loader with smart Canvas downscaling and fast self-healing direct-R2/proxy-fallback logic
           const img = new Image();
           img.crossOrigin = 'anonymous';
           img.referrerPolicy = 'no-referrer';
-          img.src = loadUrl;
+          img.decoding = 'async'; // Request async out-of-thread decoding so the browser main thread remains butter smooth
+          
+          let triedDirect = u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/');
+          img.src = triedDirect ? u : loadUrl;
+
           img.onload = () => {
             if (!active) {
               done();
               return;
             }
             try {
-              // Cap max size according to settings or fallback to 4096 for gorgeous resolution (1024 was previously causing blurry decals)
+              // Cap max size according to settings or fallback to 4096 for gorgeous resolution
               const maxDim = settings.maxTextureSize !== undefined ? settings.maxTextureSize : 4096;
               let w = img.width;
               let h = img.height;
@@ -786,12 +807,12 @@ const FBXModel: React.FC<FBXModelProps> = ({
                 canvas.height = h;
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
-                  // Use higher quality image smoothing on canvas scale down to prevent pixelation artifacts
+                  // Use higher quality image smoothing on canvas scale down
                   ctx.imageSmoothingEnabled = true;
                   ctx.imageSmoothingQuality = 'high';
                   ctx.drawImage(img, 0, 0, w, h);
                   finalSource = canvas;
-                  console.log(`[TextureOptimizer] Downscaled ${loadUrl} from ${img.width}x${img.height} to ${w}x${h} (Cap: ${maxDim})`);
+                  console.log(`[TextureOptimizer] Downscaled ${img.src} from ${img.width}x${img.height} to ${w}x${h} (Cap: ${maxDim})`);
                 }
               }
 
@@ -821,7 +842,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
               }
               // Fallback load
               const fallbackLoader = new THREE.TextureLoader();
-              fallbackLoader.load(loadUrl, (tex) => {
+              fallbackLoader.load(img.src, (tex) => {
                 if (!active) {
                   tex.dispose();
                   done();
@@ -841,41 +862,48 @@ const FBXModel: React.FC<FBXModelProps> = ({
                 });
                 done();
               }, undefined, (err) => {
-                console.error(`[FBXModel] ❌ Fallback failed: "${loadUrl}" (original: "${u}")`, err);
+                console.error(`[FBXModel] ❌ Fallback failed: "${img.src}"`, err);
                 done();
               });
             }
           };
+
           img.onerror = (err) => {
-            console.error(`[TextureOptimizer] Image load error for ${loadUrl} (original: "${u}"). Trying legacy loader as fallback:`, err);
-            if (!active) {
-              done();
-              return;
-            }
-            const fallbackLoader = new THREE.TextureLoader();
-            fallbackLoader.load(loadUrl, (tex) => {
+            if (triedDirect) {
+              console.warn(`[TextureOptimizer] Direct R2 load failed (CORS or network error) for "${u}". Falling back to proxy: "${loadUrl}"`);
+              triedDirect = false;
+              img.src = loadUrl;
+            } else {
+              console.error(`[TextureOptimizer] Image load error for ${loadUrl} (original: "${u}"). Trying legacy loader as fallback:`, err);
               if (!active) {
-                tex.dispose();
                 done();
                 return;
               }
-              tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-              tex.wrapS = THREE.RepeatWrapping;
-              tex.wrapT = THREE.RepeatWrapping;
-              const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
-              tex.flipY = shouldFlipY;
-              tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
-              tex.needsUpdate = true;
-              textureCacheRef.current[u] = tex;
-              setTextureCache(prev => {
-                if (!active) return prev;
-                return { ...prev, [u]: tex };
+              const fallbackLoader = new THREE.TextureLoader();
+              fallbackLoader.load(loadUrl, (tex) => {
+                if (!active) {
+                  tex.dispose();
+                  done();
+                  return;
+                }
+                tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+                tex.flipY = shouldFlipY;
+                tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
+                tex.needsUpdate = true;
+                textureCacheRef.current[u] = tex;
+                setTextureCache(prev => {
+                  if (!active) return prev;
+                  return { ...prev, [u]: tex };
+                });
+                done();
+              }, undefined, (fallbackErr) => {
+                console.error(`[FBXModel] ❌ Fallback failed too: "${loadUrl}" (original: "${u}")`, fallbackErr);
+                done();
               });
-              done();
-            }, undefined, (fallbackErr) => {
-              console.error(`[FBXModel] ❌ Fallback failed too: "${loadUrl}" (original: "${u}")`, fallbackErr);
-              done();
-            });
+            }
           };
         }
       });
