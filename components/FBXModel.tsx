@@ -9,6 +9,48 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import '../types';
 import { MaterialSettings, ModelPart, TextureSet } from '../types';
 
+const R2_PUBLIC_BASE_URL = 'https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/';
+const R2_PROXY_BASE_URL = 'https://fbxstudio.onrender.com';
+
+function safeDecodeRepeated(value: string): string {
+  let current = value;
+  for (let i = 0; i < 4; i++) {
+    try {
+      const next = decodeURIComponent(current);
+      if (next === current) break;
+      current = next;
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
+function buildR2ProxyUrl(key: string): string {
+  const decodedKey = safeDecodeRepeated(key.replace(/^\/+/, ''));
+  return `${R2_PROXY_BASE_URL}/api/r2/proxy?key=${encodeURIComponent(decodedKey)}`;
+}
+
+function normalizeTextureLoadUrl(url: string): string {
+  if (!url || typeof url !== 'string') return url;
+
+  if (url.startsWith(R2_PUBLIC_BASE_URL)) {
+    return buildR2ProxyUrl(url.substring(R2_PUBLIC_BASE_URL.length));
+  }
+
+  try {
+    const parsed = new URL(url, 'https://local.invalid');
+    if (parsed.pathname === '/api/r2/proxy') {
+      const key = parsed.searchParams.get('key');
+      if (key) return buildR2ProxyUrl(key);
+    }
+  } catch {
+    // Keep the original URL when it is not parseable.
+  }
+
+  return url;
+}
+
 /**
  * Automatically generates planar/box UV coordinates based on dominant normals for geometries that lack them
  * or have dummy/corrupted UV coordinates (all zero or all identical) to prevent rendering them completely black.
@@ -701,7 +743,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
     // Controlled queue execution to prevent WebGL/Browser freezing under heavy parallel decode load
     let currentIndex = 0;
-    const activeLoadsLimit = 6; // Process up to 6 textures concurrently to speed up loading and match browser network pipelines
+    const activeLoadsLimit = 4; // Process up to 6 textures concurrently to speed up loading and match browser network pipelines
 
     const loadSingleTexture = ({ url: u, isColor }: { url: string; isColor: boolean }): Promise<void> => {
       return new Promise<void>((resolve) => {
@@ -712,16 +754,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
           return;
         }
 
-        let loadUrl = u;
-if (u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/')) {
-  const keyPath = decodeURIComponent(
-    u.substring(
-      'https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/'.length
-    )
-  );
-
-  loadUrl = `/api/r2/proxy?key=${encodeURIComponent(keyPath)}`;
-}
+        const loadUrl = normalizeTextureLoadUrl(u);
 
         const lo = u.toLowerCase();
         // Inspect if URL points to a TGA/DDS file (handles files served via proxy endpoints with query params)
@@ -739,8 +772,8 @@ if (u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/')) {
 
         if (isTgaFile || isDdsFile) {
           let loader: any = isTgaFile ? tgaLoader.current : ddsLoader.current;
-          let triedDirect = u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/');
-          let currentLoadUrl = triedDirect ? u : loadUrl;
+          let triedDirect = false;
+          let currentLoadUrl = loadUrl;
 
           const executeLoad = (targetUrl: string) => {
             loader.load(targetUrl, (tex: THREE.Texture) => {
@@ -782,8 +815,8 @@ if (u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/')) {
           img.referrerPolicy = 'no-referrer';
           img.decoding = 'async'; // Request async out-of-thread decoding so the browser main thread remains butter smooth
           
-          let triedDirect = u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/');
-          img.src = triedDirect ? u : loadUrl;
+          let triedDirect = false;
+          img.src = loadUrl;
 
           img.onload = () => {
             if (!active) {
