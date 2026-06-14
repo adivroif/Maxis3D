@@ -118,6 +118,52 @@ const azureCacheDir = path.join(process.cwd(), "local_azure_cache");
 const listsCacheDir = path.join(azureCacheDir, "lists");
 const filesCacheDir = path.join(azureCacheDir, "files");
 
+const R2_PUBLIC_BASE_URL = "https://pub-721b92b9c051433d993f7185396e4c79.r2.dev";
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizeR2Key(key: string): string {
+  return safeDecodeURIComponent(String(key || "").trim()).replace(/^\/+/, "");
+}
+
+function r2ProxyUrlFromKey(key: string): string {
+  return `/api/r2/proxy?key=${encodeURIComponent(normalizeR2Key(key))}`;
+}
+
+function r2PublicUrlFromKey(key: string): string {
+  return `${R2_PUBLIC_BASE_URL}/${normalizeR2Key(key).split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function getMimeTypeByFileName(fileName: string): string {
+  const ext = path.extname(fileName).toLowerCase();
+  const mimeTypes: Record<string, string> = {
+    ".fbx": "application/octet-stream",
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".tga": "image/tga",
+    ".dds": "image/vnd.ms-dds",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+    ".txt": "text/plain",
+    ".json": "application/json",
+    ".pdf": "application/pdf"
+  };
+
+  return mimeTypes[ext] || "application/octet-stream";
+}
+
+
 function ensureAzureCacheDirs() {
   try {
     if (!fs.existsSync(azureCacheDir)) fs.mkdirSync(azureCacheDir, { recursive: true });
@@ -671,6 +717,18 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,PUT,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Range");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Type, ETag, Accept-Ranges, Content-Range");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
+
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
@@ -1165,7 +1223,7 @@ async function startServer() {
         res.setHeader("Content-Type", mimeTypes[ext]);
       }
       res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "public, max-age=31536000");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       
       return res.sendFile(path.resolve(localFilePath));
     }
@@ -1181,7 +1239,7 @@ async function startServer() {
     } else {
       r2Path = `${folder}/${targetFileName}`;
     }
-    const azureFileUrl = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/${r2Path}`;
+    const azureFileUrl = r2PublicUrlFromKey(r2Path);
     try {
       console.log(`[Proxy] Resilient request for ${folder}/${targetFileName} (original: ${fileName}). URL: ${azureFileUrl} (cacheStatus: MISS)`);
       
@@ -1241,7 +1299,7 @@ async function startServer() {
         res.setHeader("Content-Type", mimeTypes[ext]);
       }
       res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "public, max-age=31536000");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
       return res.send(buffer);
     } catch (err: any) {
       console.warn(`[Proxy Fallback] Failed to fetch live file ${targetFileName} (${err.message}). Checking disk cache...`);
@@ -1267,7 +1325,7 @@ async function startServer() {
           res.setHeader("Content-Type", mimeTypes[ext]);
         }
         res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "public, max-age=31536000");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         
         return res.sendFile(path.resolve(fuzzyFilePath));
       } else if (fs.existsSync(localFilePath)) {
@@ -1289,7 +1347,7 @@ async function startServer() {
           res.setHeader("Content-Type", mimeTypes[ext]);
         }
         res.setHeader("Access-Control-Allow-Origin", "*");
-        res.setHeader("Cache-Control", "public, max-age=31536000");
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
         
         return res.sendFile(path.resolve(localFilePath));
       } else {
@@ -1323,7 +1381,7 @@ async function startServer() {
         const effectiveFolder = folder as string;
         let finalUrl = "";
         if (effectiveFolder === "images" || effectiveFolder.toLowerCase().includes("image")) {
-          finalUrl = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(fileNameStr)}`;
+          finalUrl = r2ProxyUrlFromKey(`images/${fileNameStr}`);
         } else {
           finalUrl = `/api/files/get-file?folder=${encodeURIComponent(effectiveFolder)}&clientName=${encodeURIComponent(activeClient)}&fileName=${encodeURIComponent(fileNameStr)}`;
         }
@@ -1497,7 +1555,7 @@ async function startServer() {
         const effectiveFolder = folder as string;
         let finalUrl = "";
         if (effectiveFolder === "images" || effectiveFolder.toLowerCase().includes("image")) {
-          finalUrl = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(fileName)}`;
+          finalUrl = r2ProxyUrlFromKey(`images/${fileName}`);
         } else {
           finalUrl = `/api/files/get-file?folder=${encodeURIComponent(effectiveFolder)}&clientName=${encodeURIComponent(activeClient)}&fileName=${encodeURIComponent(fileName)}`;
         }
@@ -2207,11 +2265,14 @@ async function startServer() {
         const key = obj.Key || "";
         const fileName = path.basename(key);
         
+        const proxyUrl = r2ProxyUrlFromKey(key);
+
         return {
           FileName: fileName,
           FullPath: key,
-          ContentType: `image/${path.extname(key).slice(1)}`.replace("image/jpg", "image/jpeg"),
-          Url: `/api/r2/proxy?key=${encodeURIComponent(key)}`
+          ContentType: getMimeTypeByFileName(key),
+          url: proxyUrl,
+          Url: proxyUrl
         };
       });
 
@@ -2224,15 +2285,11 @@ async function startServer() {
 
   // Proxy route to fetch files from R2 and serve them from our domain (bypasses CORS)
   app.get("/api/r2/proxy", async (req, res) => {
-    let key = req.query.key as string;
+    let key = Array.isArray(req.query.key) ? req.query.key[0] as string : req.query.key as string;
     if (!key) return res.status(400).send("Key is required");
 
     try {
-      try {
-        key = decodeURIComponent(key);
-      } catch (e) {
-        console.warn("Failed to decode proxy key, using raw", e);
-      }
+      key = normalizeR2Key(key);
 
       const bucket = process.env.R2_BUCKET_NAME;
       if (!bucket) throw new Error("R2_BUCKET_NAME is not configured");
@@ -2251,17 +2308,7 @@ async function startServer() {
       // Set Content-Type from response or fallback based on extension
       let contentType = response.ContentType;
       if (!contentType || contentType === 'application/octet-stream') {
-        const ext = path.extname(key).toLowerCase();
-        const mimeTypes: Record<string, string> = {
-          '.png': 'image/png',
-          '.jpg': 'image/jpeg',
-          '.jpeg': 'image/jpeg',
-          '.webp': 'image/webp',
-          '.tga': 'image/tga',
-          '.dds': 'image/vnd.ms-dds',
-          '.fbx': 'application/octet-stream'
-        };
-        contentType = mimeTypes[ext] || 'application/octet-stream';
+        contentType = getMimeTypeByFileName(key);
       }
       
       res.setHeader("Content-Type", contentType);
@@ -2270,9 +2317,13 @@ async function startServer() {
         res.setHeader("Content-Length", response.ContentLength.toString());
       }
       
-      // Add CORS and caching headers
+      // Add CORS and aggressive browser caching headers
       res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "public, max-age=31536000");
+      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Range");
+      res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Type, ETag, Accept-Ranges, Content-Range");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("X-Content-Type-Options", "nosniff");
 
       // Stream the body to the response
       const body = response.Body as any;
