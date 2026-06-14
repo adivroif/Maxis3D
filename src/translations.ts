@@ -31,6 +31,7 @@ export interface Translations {
   noDescription: string;
   viewDetails: string;
   modelParts: string;
+  noRelatedParts: string;
   labelPartKey: string;
   labelPartName: string;
   labelPartDescription: string;
@@ -73,6 +74,7 @@ export const translations: Record<Language, Translations> = {
     noDescription: "No description available",
     viewDetails: "View Details",
     modelParts: "Relateble",
+    noRelatedParts: "No related parts for this product",
     labelPartKey: "Key",
     labelPartName: "Name",
     labelPartDescription: "Description",
@@ -113,6 +115,7 @@ export const translations: Record<Language, Translations> = {
     noDescription: "אין פירוט",
     viewDetails: "צפה בפרטים",
     modelParts: "חלקים קשורים",
+    noRelatedParts: "אין חלקים מקושרים למוצר זה",
     labelPartKey: "מפתח",
     labelPartName: "שם",
     labelPartDescription: "תיאור",
@@ -153,6 +156,7 @@ export const translations: Record<Language, Translations> = {
     noDescription: "لا يوجد وصف متاح",
     viewDetails: "عرض التفاصيل",
     modelParts: "أجزاء ذات صلة",
+    noRelatedParts: "لا توجد أجزاء ذات صلة لهذا المنتج",
     labelPartKey: "مفتاح",
     labelPartName: "اسم",
     labelPartDescription: "وصف",
@@ -193,6 +197,7 @@ export const translations: Record<Language, Translations> = {
     noDescription: "Описание отсутствует",
     viewDetails: "Посмотреть детали",
     modelParts: "Связанные части",
+    noRelatedParts: "Нет связанных частей для этого продукта",
     labelPartKey: "Ключ",
     labelPartName: "Имя",
     labelPartDescription: "Описание",
