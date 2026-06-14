@@ -1800,8 +1800,7 @@ const App: React.FC = () => {
                     </div>
 
                     {/* Parts Section */}
-                    {(isFetchingParts || (modelParts && modelParts.length > 0)) && (
-                      <div className="space-y-4">
+                    <div className="space-y-4">
                         <div className="flex items-center gap-2 mb-2">
                           <div className={`w-1 h-3 bg-yellow-500 rounded-full ${isRTL ? 'ml-0' : ''}`}></div>
                           <h3 className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
@@ -1819,11 +1818,20 @@ const App: React.FC = () => {
                               </div>
                             ))}
                           </div>
-                        ) : (
-                          <div className="grid gap-2">
-                            {modelParts
-                              .filter(part => part.presentAtSite !== false)
-                              .map((part) => {
+                        ) : (() => {
+                          const visibleParts = modelParts ? modelParts.filter(part => part.presentAtSite !== false) : [];
+                          if (visibleParts.length === 0) {
+                            return (
+                              <div className={`p-6 rounded-3xl border text-center text-xs font-semibold leading-relaxed ${
+                                isNightMode ? 'bg-zinc-800/30 border-white/10 text-zinc-400' : 'bg-zinc-50/50 border-black/5 text-zinc-500'
+                              }`}>
+                                {t.noRelatedParts}
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="grid gap-2">
+                              {visibleParts.map((part) => {
                                 const tr = translatedParts[part.id];
                                 const name = tr?.name || part.partName;
                                 const description = tr?.description || part.description;
@@ -1997,12 +2005,11 @@ const App: React.FC = () => {
                                     )}
                                   </button>
                                 );
-                              })
-                            }
-                          </div>
-                        )}
+                              })}
+                            </div>
+                          );
+                        })()}
                       </div>
-                    )}
                   </div>
                 </div>
               </div>
