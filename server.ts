@@ -634,47 +634,11 @@ const defaultElsaParts = [
 
 function initializePartsCache() {
   try {
-    let cacheData: any = {};
-    if (fs.existsSync(cacheFilePath)) {
-      cacheData = JSON.parse(fs.readFileSync(cacheFilePath, "utf-8"));
-    }
-    
-    // Seed default parts for Axe in both "Axe" and lowercase "axe" versions
-    if (!cacheData["Axe"]) {
-      cacheData["Axe"] = defaultAxeParts;
-    }
-    if (!cacheData["axe"]) {
-      cacheData["axe"] = defaultAxeParts.map(p => ({ ...p, modelName: "axe" }));
-    }
-
-    // Seed default parts for Pipe
-    if (!cacheData["Pipe"]) {
-      cacheData["Pipe"] = defaultPipeParts;
-    }
-    if (!cacheData["pipe"]) {
-      cacheData["pipe"] = defaultPipeParts.map(p => ({ ...p, modelName: "pipe" }));
-    }
-
-    // Seed default parts for Chest
-    if (!cacheData["Chest"]) {
-      cacheData["Chest"] = defaultChestParts;
-    }
-    if (!cacheData["chest"]) {
-      cacheData["chest"] = defaultChestParts.map(p => ({ ...p, modelName: "chest" }));
-    }
-
-    // Seed default parts for ELSA
-    if (!cacheData["ELSA 2 Caliper Guide Pin 35X144mm"]) {
-      cacheData["ELSA 2 Caliper Guide Pin 35X144mm"] = defaultElsaParts;
-    }
-    if (!cacheData["elsa 2 caliper guide pin 35x144mm"]) {
-      cacheData["elsa 2 caliper guide pin 35x144mm"] = defaultElsaParts.map(p => ({ ...p, modelName: "elsa 2 caliper guide pin 35x144mm" }));
-    }
-    
+    const cacheData: any = {};
     fs.writeFileSync(cacheFilePath, JSON.stringify(cacheData, null, 2), "utf-8");
-    console.log("✅ Model parts cache initialized and seeded.");
+    console.log("✅ Model parts cache initialized and cleared of mock seeds.");
   } catch (err) {
-    console.error("⚠️ Failed to initialize or seed parts cache:", err);
+    console.error("⚠️ Failed to initialize parts cache:", err);
   }
 }
 
@@ -791,15 +755,16 @@ async function startServer() {
         }
 
         const text = await response.text();
-        if (!text || text.trim() === "") return null;
+        if (!text || text.trim() === "") {
+          saveCachedParts(name, []);
+          return [];
+        }
         
         try {
           const data = JSON.parse(text);
           // Standardize response to part objects
           const rawParts = Array.isArray(data) ? data : (data.parts || data.data || data.items || []);
           
-          if (rawParts.length === 0) return null;
-
           const parts = rawParts.map((item: any) => ({
             id: (item.partId || item.PartId || Math.random().toString(36).substr(2, 9)).toString(),
             modelName: name,
@@ -809,7 +774,7 @@ async function startServer() {
             presentAtSite: item.presentAtSite ?? item.PresentAtSite ?? true // Default to true if not provided by API
           }));
 
-          // Sync successful response to our local file cache
+          // Sync successful response to our local file cache (even if parts is empty, because that is what is in the DB)
           saveCachedParts(name, parts);
           return parts;
         } catch (jsonErr) {
@@ -823,10 +788,10 @@ async function startServer() {
     };
 
     const cachedParts = getCachedParts(modelName);
-    const hasCache = cachedParts && cachedParts.length > 0;
+    const hasCache = cachedParts !== null;
 
     if (hasCache) {
-      console.log(`[Cache First] Serving model parts instantly from cache for: ${modelName}`);
+      console.log(`[Cache First] Serving model parts instantly from cache for: ${modelName} (${cachedParts.length} parts)`);
 
       // Asynchronously refresh in the background with a larger timeout to avoid timeout warnings
       (async () => {
@@ -844,13 +809,13 @@ async function startServer() {
       // Use strictly the modelName (usually the filename) for the parts lookup with a robust timeout
       let parts = await tryFetchParts(modelName, 15000, 2, !hasCache);
 
-      // FALLBACK: Serve cached or pre-seeded data if primary API did not return parts or is slow
-      if (!parts || parts.length === 0) {
-        console.log(`Serving cached and seeded backup for model: ${modelName}`);
+      // FALLBACK: Only serve cached backup if primary API request failed entirely (returned null)
+      if (parts === null) {
+        console.log(`Fetch failed from API, checking cached backup for model: ${modelName}`);
         parts = getCachedParts(modelName);
       }
 
-      if (parts && parts.length > 0) {
+      if (parts) {
         return res.json(parts);
       }
       
