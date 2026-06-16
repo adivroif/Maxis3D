@@ -714,6 +714,13 @@ const FBXModel: React.FC<FBXModelProps> = ({
   const frameTime = 1 / 25;
   const prevDirectionRef = useRef(settings.animationDirection);
 
+  const entryProgressRef = useRef(0);
+  const outerGroupRef = useRef<THREE.Group>(null);
+
+  useEffect(() => {
+    entryProgressRef.current = 0;
+  }, [url, fbx]);
+
   // ── Compute full serialized list of all texture URLs needed for the model ──
   const textureUrlsKey = useMemo(() => {
     const seen = new Set<string>();
@@ -1173,9 +1180,33 @@ const FBXModel: React.FC<FBXModelProps> = ({
   useEffect(() => { return () => { if (mixer) mixer.stopAllAction(); }; }, [mixer]);
 
   // ── useFrame: root lock + animation stepping + explosion ─────────────────
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!fbx) return;
     fbx.position.copy(rootPos.current); fbx.rotation.copy(rootRot.current); fbx.scale.copy(rootScale.current); fbx.updateMatrixWorld(true);
+
+    // Smooth entry transition animation and breathing float
+    entryProgressRef.current = THREE.MathUtils.lerp(entryProgressRef.current, 1.0, 0.04);
+    const progress = entryProgressRef.current;
+
+    if (outerGroupRef.current) {
+      // Scale: start from 0 and scale up smoothly to scaleFactor
+      const animScale = progress * scaleFactor;
+      outerGroupRef.current.scale.set(animScale, animScale, animScale);
+
+      // Position: start from slightly lower and float up gracefully
+      // Add a subtle premium floating breathing idle motion
+      const hoverY = progress > 0.95 ? Math.sin(state.clock.getElapsedTime() * 1.5) * 0.12 : 0;
+      const startYOffset = -12 * (1 - progress);
+      outerGroupRef.current.position.set(
+        centeringOffset[0],
+        centeringOffset[1] + startYOffset + hoverY,
+        centeringOffset[2]
+      );
+      
+      // Gentle spin on entry
+      outerGroupRef.current.rotation.y = (1 - progress) * 0.45;
+    }
+
     if (mixer) {
       const isPlaying = settings.isPlayingAnimation;
       const isAnyRunning = Object.values(actions).some(a => a?.isRunning());
@@ -1613,7 +1644,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
   if (!fbx) return null;
 
   return (
-    <group position={centeringOffset} scale={scaleFactor}>
+    <group ref={outerGroupRef}>
       <primitive key={url} object={fbx} />
       {hotspots.map((hs) => (
         <group key={hs.id} position={hs.anchorPosition}>
