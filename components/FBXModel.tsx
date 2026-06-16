@@ -10,7 +10,7 @@ import '../types';
 import { MaterialSettings, ModelPart, TextureSet } from '../types';
 
 const R2_PUBLIC_BASE_URL = 'https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/';
-const R2_PROXY_BASE_URL = 'https://fbxstudio.onrender.com';
+const R2_PROXY_BASE_URL = '';
 
 function safeDecodeRepeated(value: string): string {
   let current = value;
@@ -585,6 +585,8 @@ interface FBXModelProps {
   hoveredPartId?: string | null;
   onUVLayoutGenerated?: (svg: string, filename: string) => void;
   onPartUVLayoutGenerated?: (meshName: string, svg: string, filename: string) => void;
+  onTexturesProgress?: (loaded: number, total: number) => void;
+  onFbxLoaded?: () => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -599,7 +601,9 @@ const FBXModel: React.FC<FBXModelProps> = ({
   translatedParts = {}, isMobile = false,
   hoveredPartId = null,
   onUVLayoutGenerated,
-  onPartUVLayoutGenerated
+  onPartUVLayoutGenerated,
+  onTexturesProgress,
+  onFbxLoaded
 }) => {
   const originalFbx = useLoader(FBXLoader, url);
 
@@ -609,12 +613,16 @@ const FBXModel: React.FC<FBXModelProps> = ({
   const onAnimationsDetectedRef = useRef(onAnimationsDetected);
   const onUVLayoutGeneratedRef = useRef(onUVLayoutGenerated);
   const onPartUVLayoutGeneratedRef = useRef(onPartUVLayoutGenerated);
+  const onTexturesProgressRef = useRef(onTexturesProgress);
+  const onFbxLoadedRef = useRef(onFbxLoaded);
 
   useEffect(() => { onMaterialsLoadedRef.current = onMaterialsLoaded; }, [onMaterialsLoaded]);
   useEffect(() => { onMeshesLoadedRef.current = onMeshesLoaded; }, [onMeshesLoaded]);
   useEffect(() => { onAnimationsDetectedRef.current = onAnimationsDetected; }, [onAnimationsDetected]);
+  useEffect(() => { onTexturesProgressRef.current = onTexturesProgress; }, [onTexturesProgress]);
   useEffect(() => { onUVLayoutGeneratedRef.current = onUVLayoutGenerated; }, [onUVLayoutGenerated]);
   useEffect(() => { onPartUVLayoutGeneratedRef.current = onPartUVLayoutGenerated; }, [onPartUVLayoutGenerated]);
+  useEffect(() => { onFbxLoadedRef.current = onFbxLoaded; }, [onFbxLoaded]);
 
   const fbx = useMemo(() => {
     const clone = SkeletonUtils.clone(originalFbx);
@@ -670,6 +678,15 @@ const FBXModel: React.FC<FBXModelProps> = ({
     return clone;
   }, [originalFbx]);
 
+  useEffect(() => {
+    if (fbx && onFbxLoadedRef.current) {
+      const cb = onFbxLoadedRef.current;
+      setTimeout(() => {
+        cb();
+      }, 0);
+    }
+  }, [fbx]);
+
   const mixer = useMemo(() => fbx ? new THREE.AnimationMixer(fbx) : null, [fbx]);
   const actions = useMemo(() => {
     const res: { [key: string]: THREE.AnimationAction } = {};
@@ -691,27 +708,22 @@ const FBXModel: React.FC<FBXModelProps> = ({
   const rootPos = useRef(new THREE.Vector3());
   const rootRot = useRef(new THREE.Euler());
   const rootScale = useRef(new THREE.Vector3(1, 1, 1));
-  const [internalExplodeFactor, setInternalExplodeFactor] = useState(0);
+  const internalExplodeFactorRef = useRef(0);
   const prevPlayingRef = useRef(false);
   const accumulatorRef = useRef(0);
   const frameTime = 1 / 25;
   const prevDirectionRef = useRef(settings.animationDirection);
 
-  // ── Collect ALL texture URLs from textureSets + legacy settings ──────────
-  useEffect(() => {
-    let active = true;
-
-    // Use a Set to deduplicate URLs within this same effect run,
-    // AND check textureCacheRef to skip already-loaded ones.
+  // ── Compute full serialized list of all texture URLs needed for the model ──
+  const textureUrlsKey = useMemo(() => {
     const seen = new Set<string>();
-    const toLoad: { url: string; isColor: boolean }[] = [];
+    const urls: { url: string; isColor: boolean }[] = [];
 
     const add = (u: unknown, isColor: boolean) => {
       if (!u || typeof u !== 'string') return;
-      if (textureCacheRef.current[u]) return; // already loaded
-      if (seen.has(u)) return;                // duplicate in this batch
+      if (seen.has(u)) return;
       seen.add(u);
-      toLoad.push({ url: u, isColor });
+      urls.push({ url: u, isColor });
     };
 
     // New textureSets API
@@ -737,13 +749,67 @@ const FBXModel: React.FC<FBXModelProps> = ({
     Object.values(settings.heightMappings || {}).forEach(u => add(u, false));
     Object.values(settings.specularMappings || {}).forEach(u => add(u, false));
 
-    console.log(`[FBXModel] 📦 Queuing ${toLoad.length} unique textures to load (sequential/batch concurrency queue)`);
+    // Preload ALL texture mappings from color variants to enable instant material switching
+    if (settings.colorVariants && Array.isArray(settings.colorVariants)) {
+      settings.colorVariants.forEach(variant => {
+        if (variant.mappings) {
+          Object.values(variant.mappings || {}).forEach(u => add(u, true));
+        }
+        if (variant.normalMappings) {
+          Object.values(variant.normalMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.metalMappings) {
+          Object.values(variant.metalMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.roughMappings) {
+          Object.values(variant.roughMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.alphaMappings) {
+          Object.values(variant.alphaMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.emissiveMappings) {
+          Object.values(variant.emissiveMappings || {}).forEach(u => add(u, true));
+        }
+        if (variant.aoMappings) {
+          Object.values(variant.aoMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.heightMappings) {
+          Object.values(variant.heightMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.specularMappings) {
+          Object.values(variant.specularMappings || {}).forEach(u => add(u, false));
+        }
+      });
+    }
+
+    return JSON.stringify(urls);
+  }, [textureSets, settings.materialMappings, settings.normalMappings, settings.metalMappings, settings.roughMappings, settings.alphaMappings, settings.emissiveMappings, settings.aoMappings, settings.heightMappings, settings.specularMappings, settings.colorVariants]);
+
+  // ── Pre-load the remaining textures in a controlled background queue ───────
+  useEffect(() => {
+    let active = true;
+
+    // Parse the full target texture URLs list
+    const allUrls: { url: string; isColor: boolean }[] = JSON.parse(textureUrlsKey);
+
+    // Only load ones that aren't already cache-hits
+    const toLoad = allUrls.filter(item => !textureCacheRef.current[item.url]);
+
+    console.log(`[FBXModel] 📦 Queuing ${toLoad.length} unique textures to load (sequential/batch queue)`);
+
+    if (onTexturesProgressRef.current) {
+      const cb = onTexturesProgressRef.current;
+      const totalCount = toLoad.length;
+      setTimeout(() => {
+        cb(0, totalCount);
+      }, 0);
+    }
 
     if (toLoad.length === 0) return;
 
     // Controlled queue execution to prevent WebGL/Browser freezing under heavy parallel decode load
     let currentIndex = 0;
-    const activeLoadsLimit = 4; // Process up to 6 textures concurrently to speed up loading and match browser network pipelines
+    const activeLoadsLimit = 8; // Process up to 8 textures concurrently to speed up loading and match browser network pipelines
 
     const loadSingleTexture = ({ url: u, isColor }: { url: string; isColor: boolean }): Promise<void> => {
       return new Promise<void>((resolve) => {
@@ -942,10 +1008,21 @@ const FBXModel: React.FC<FBXModelProps> = ({
       });
     };
 
+    let loadedCount = 0;
     const runQueue = () => {
       if (!active || currentIndex >= toLoad.length) return;
       const nextItem = toLoad[currentIndex++];
       loadSingleTexture(nextItem).then(() => {
+        if (!active) return;
+        loadedCount++;
+        if (onTexturesProgressRef.current) {
+          const cb = onTexturesProgressRef.current;
+          const currentLoaded = loadedCount;
+          const totalCount = toLoad.length;
+          setTimeout(() => {
+            cb(currentLoaded, totalCount);
+          }, 0);
+        }
         runQueue();
       });
     };
@@ -959,7 +1036,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
     return () => {
       active = false;
     };
-  }, [textureSets, settings]);
+  }, [textureUrlsKey]);
 
   useEffect(() => { textureCacheRef.current = textureCache; }, [textureCache]);
 
@@ -1108,8 +1185,8 @@ const FBXModel: React.FC<FBXModelProps> = ({
       } else if (accumulatorRef.current > 0) { mixer.update(accumulatorRef.current); accumulatorRef.current = 0; }
     }
     const target = settings.isExploded ? 1.0 : 0.0;
-    const nextFactor = THREE.MathUtils.lerp(internalExplodeFactor, target, 0.05);
-    if (Math.abs(nextFactor - internalExplodeFactor) > 0.0001) setInternalExplodeFactor(nextFactor);
+    const nextFactor = THREE.MathUtils.lerp(internalExplodeFactorRef.current, target, 0.05);
+    internalExplodeFactorRef.current = nextFactor;
     const isAnyActionRunning = mixer && Object.values(actions).some(a => a?.isRunning());
     if (nextFactor > 0.001 && !isAnyActionRunning) {
       fbx.traverse((child) => {
@@ -1432,18 +1509,32 @@ const FBXModel: React.FC<FBXModelProps> = ({
   useEffect(() => {
     setMaterialNames(names);
     setMeshNames(meshes);
-    if (onAnimationsDetectedRef.current) onAnimationsDetectedRef.current(fbx && fbx.animations && fbx.animations.length > 0);
+    if (onAnimationsDetectedRef.current) {
+      const cb = onAnimationsDetectedRef.current;
+      const hasAnim = !!(fbx && fbx.animations && fbx.animations.length > 0);
+      setTimeout(() => {
+        cb(hasAnim);
+      }, 0);
+    }
   }, [fbx, names, meshes]);
 
   useEffect(() => {
     if (onMaterialsLoadedRef.current && materialNames.length > 0) {
-      onMaterialsLoadedRef.current(materialNames);
+      const cb = onMaterialsLoadedRef.current;
+      const mats = materialNames;
+      setTimeout(() => {
+        cb(mats);
+      }, 0);
     }
   }, [materialNames]);
 
   useEffect(() => {
     if (onMeshesLoadedRef.current && meshNames.length > 0) {
-      onMeshesLoadedRef.current(meshNames);
+      const cb = onMeshesLoadedRef.current;
+      const msh = meshNames;
+      setTimeout(() => {
+        cb(msh);
+      }, 0);
     }
   }, [meshNames]);
 
