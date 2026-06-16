@@ -144,6 +144,7 @@ const App: React.FC = () => {
   const [texturesLoaded, setTexturesLoaded] = useState(0);
   const [texturesTotal, setTexturesTotal] = useState(-1);
   const [isFbxDone, setIsFbxDone] = useState(false);
+  const [smoothProgress, setSmoothProgress] = useState(0);
 
   useEffect(() => {
     // Safely subscribe to global Drei loader progress outside the React render path 
@@ -164,6 +165,7 @@ const App: React.FC = () => {
       setTexturesLoaded(0);
       setTexturesTotal(-1);
       setIsFbxDone(false);
+      setSmoothProgress(0);
     }
   }, [selectedModel?.url]);
 
@@ -1470,7 +1472,30 @@ const App: React.FC = () => {
   // Clamp progress
   unifiedProgress = Math.min(100, Math.max(0, unifiedProgress));
 
-  const isModelFullyLoaded = isFbxDone && texturesTotal >= 0 && (texturesTotal === 0 || texturesLoaded >= texturesTotal);
+  // Frame-by-frame interpolation of smoothProgress towards unifiedProgress for maximum fluid response
+  useEffect(() => {
+    let rAF: number;
+    const update = () => {
+      setSmoothProgress((prev) => {
+        if (prev < unifiedProgress) {
+          const diff = unifiedProgress - prev;
+          // Calculate step with easing, ensuring a minimal speed to avoid getting stuck
+          const step = Math.max(0.18, diff * 0.04);
+          const next = prev + step;
+          return next >= unifiedProgress ? unifiedProgress : next;
+        } else if (prev > unifiedProgress) {
+          return unifiedProgress;
+        }
+        return prev;
+      });
+      rAF = requestAnimationFrame(update);
+    };
+    rAF = requestAnimationFrame(update);
+    return () => cancelAnimationFrame(rAF);
+  }, [unifiedProgress]);
+
+  const isTargetFullyLoaded = isFbxDone && texturesTotal >= 0 && (texturesTotal === 0 || texturesLoaded >= texturesTotal);
+  const isModelFullyLoaded = isTargetFullyLoaded && smoothProgress >= 99.9;
   const showModelLoadingScreen = !!selectedModel && !isModelFullyLoaded;
 
   return (
@@ -1631,14 +1656,14 @@ const App: React.FC = () => {
                   className="stroke-yellow-500 transition-all duration-300 ease-out"
                   strokeWidth="5"
                   strokeDasharray={2 * Math.PI * 48}
-                  strokeDashoffset={2 * Math.PI * 48 * (1 - unifiedProgress / 100)}
+                  strokeDashoffset={2 * Math.PI * 48 * (1 - smoothProgress / 100)}
                   strokeLinecap="round"
                   fill="none"
                 />
               </svg>
               {/* Percentage number centrally positioned inside */}
               <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
-                <span className="text-2xl font-black text-zinc-950 dark:text-white font-mono tracking-tight">{unifiedProgress}%</span>
+                <span className="text-2xl font-black text-zinc-950 dark:text-white font-mono tracking-tight">{Math.round(smoothProgress)}%</span>
               </div>
             </div>
           </div>
