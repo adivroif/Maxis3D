@@ -2,7 +2,7 @@
 import React, { useState, Suspense, useCallback, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, PerspectiveCamera, Environment, Float, Html, Center } from '@react-three/drei';
+import { OrbitControls, PerspectiveCamera, Environment, Float, Html, Center, useProgress } from '@react-three/drei';
 import * as THREE from 'three';
 import './types';
 import FBXModel, { generateSingleMeshUVSVG } from './components/FBXModel';
@@ -106,6 +106,8 @@ const isModelTextureMatch = (fileName: string, modelName: string): boolean => {
   return !isAlphanumeric;
 };
 
+
+
 const App: React.FC = () => {
   const [models, setModels] = useState<SceneModelInstance[]>([]);
   const [catalogFiles, setCatalogFiles] = useState<any[]>([]);
@@ -136,6 +138,35 @@ const App: React.FC = () => {
   const [uvLayoutFilename, setUvLayoutFilename] = useState<string>('');
   const [partUVMaps, setPartUVMaps] = useState<Record<string, { svg: string; filename: string }>>({});
   const [inspectedUVPart, setInspectedUVPart] = useState<{ name: string; svg: string; filename: string } | null>(null);
+  
+  // Unified 3D model & texture preloading progress tracking states
+  const [fbxProgress, setFbxProgress] = useState(0);
+  const [texturesLoaded, setTexturesLoaded] = useState(0);
+  const [texturesTotal, setTexturesTotal] = useState(-1);
+  const [isFbxDone, setIsFbxDone] = useState(false);
+
+  useEffect(() => {
+    // Safely subscribe to global Drei loader progress outside the React render path 
+    const unsubscribe = useProgress.subscribe((state) => {
+      const p = state.progress;
+      setTimeout(() => {
+        setFbxProgress(Math.floor(p));
+      }, 0);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const selectedModel = models.find(m => m.id === selectedId);
+
+  useEffect(() => {
+    if (selectedModel?.url) {
+      setFbxProgress(0);
+      setTexturesLoaded(0);
+      setTexturesTotal(-1);
+      setIsFbxDone(false);
+    }
+  }, [selectedModel?.url]);
+
   const t = translations[language];
 
   useEffect(() => {
@@ -154,8 +185,6 @@ const App: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [toast]);
-
-  const selectedModel = models.find(m => m.id === selectedId);
 
   const fetchingModels = useRef(new Set<string>());
 
@@ -227,11 +256,10 @@ const App: React.FC = () => {
               if (typeof item === 'string') return { key: item, name: item, url: item };
               const name = item.fileName || item.FileName || item.filename || item.Name || item.name || "";
               const key = item.fullPath || item.FullPath || item.fullpath || item.Key || item.item_key || item.key || name || "";
-              // Models (.fbx) must load through proxy instead of direct R2 as R2 fetches fail for them
               const itemUrl = item.url || item.Url || "";
-              const url = (itemUrl && !itemUrl.includes("pub-")) 
+              const url = (itemUrl && itemUrl.includes("pub-")) 
                 ? itemUrl 
-                : `/api/files/get-file?folder=tenants&clientName=tenantA&fileName=${encodeURIComponent(name)}`;
+                : `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/tenants/tenantA/${encodeURIComponent(name)}`;
               return { key, name, url };
             })
             .filter((f: any) => f.name.toLowerCase().endsWith(".fbx") || f.key.toLowerCase().endsWith(".fbx"));
@@ -1426,6 +1454,25 @@ const App: React.FC = () => {
     return baseColorVariants.length > 1 ? baseColorVariants : [];
   }, [selectedModel, activeMaterialName]);
 
+  // Compute unified percentage progress
+  let unifiedProgress = 0;
+  if (!isFbxDone) {
+    // FBX stage handles 0% to 30%
+    unifiedProgress = Math.round(fbxProgress * 0.3);
+  } else {
+    // Textures stage handles 30% to 100%
+    if (texturesTotal <= 0) {
+      unifiedProgress = texturesTotal === 0 ? 100 : 30;
+    } else {
+      unifiedProgress = Math.round(30 + (texturesLoaded / texturesTotal) * 70);
+    }
+  }
+  // Clamp progress
+  unifiedProgress = Math.min(100, Math.max(0, unifiedProgress));
+
+  const isModelFullyLoaded = isFbxDone && texturesTotal >= 0 && (texturesTotal === 0 || texturesLoaded >= texturesTotal);
+  const showModelLoadingScreen = !!selectedModel && !isModelFullyLoaded;
+
   return (
     <div className={`relative w-screen h-screen overflow-hidden bg-transparent text-zinc-900 font-sans transition-colors duration-500 ${isRTL ? 'rtl' : 'ltr'}`} dir={isRTL ? 'rtl' : 'ltr'}>
       {/* BACKGROUND LAYER */}
@@ -1560,6 +1607,43 @@ const App: React.FC = () => {
 
       {/* CENTER - VIEWPORT */}
       <div className={`absolute inset-0 z-10 transition-colors duration-1000 ${isNightMode ? 'bg-zinc-800/50' : 'bg-transparent'}`}>
+        
+        {showModelLoadingScreen && (
+          <div className="absolute inset-0 z-40 bg-stone-50/90 backdrop-blur-md dark:bg-zinc-950/90 flex flex-col items-center justify-center animate-in fade-in duration-300">
+            {/* Elegant Circular Progress Loader with percentages and continuous rotation */}
+            <div className="relative w-28 h-28 flex items-center justify-center">
+              {/* Spinning/progress SVG circle - spinning continuously */}
+              <svg className="w-full h-full transform -rotate-90 animate-spin" style={{ animationDuration: '3s' }}>
+                {/* Background circle */}
+                <circle
+                  cx="56"
+                  cy="56"
+                  r="48"
+                  className="stroke-zinc-200 dark:stroke-zinc-800"
+                  strokeWidth="5"
+                  fill="none"
+                />
+                {/* Progress circle */}
+                <circle
+                  cx="56"
+                  cy="56"
+                  r="48"
+                  className="stroke-yellow-500 transition-all duration-300 ease-out"
+                  strokeWidth="5"
+                  strokeDasharray={2 * Math.PI * 48}
+                  strokeDashoffset={2 * Math.PI * 48 * (1 - unifiedProgress / 100)}
+                  strokeLinecap="round"
+                  fill="none"
+                />
+              </svg>
+              {/* Percentage number centrally positioned inside */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                <span className="text-2xl font-black text-zinc-950 dark:text-white font-mono tracking-tight">{unifiedProgress}%</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         <Canvas 
           shadows 
           dpr={[1, 2]} 
@@ -1578,6 +1662,7 @@ const App: React.FC = () => {
         >
           <PerspectiveCamera makeDefault position={isMobile ? [0, 40, 180] : [0, 30, 120]} fov={35} near={0.1} far={2000} />
           <CameraHandler targetView={targetView} controlsRef={controlsRef} activePartMesh={activePart?.mesh} />
+
           <Suspense fallback={<Html center><div className="text-yellow-500 font-black uppercase tracking-[0.5em] animate-pulse text-[10px]">{t.initializing}</div></Html>}>
             {isUploading && (
               <Html center>
@@ -1598,7 +1683,7 @@ const App: React.FC = () => {
               <Environment preset={envPreset as any} />
             )}
             {models.map((model) => (
-              <group key={model.id} position={model.position} onPointerDown={(e) => { e.stopPropagation(); if (selectedId !== model.id) setSelectedId(model.id); }}>
+              <group key={model.id} position={model.position} visible={isModelFullyLoaded} onPointerDown={(e) => { e.stopPropagation(); if (selectedId !== model.id) setSelectedId(model.id); }}>
                 <ModelErrorBoundary
                   modelName={model.name}
                   language={language}
@@ -1618,6 +1703,7 @@ const App: React.FC = () => {
                     modelParts={modelParts}
                     activePartId={activePart?.id}
                     onPartClick={handlePartClick}
+                    onFbxLoaded={() => setIsFbxDone(true)}
                     onMaterialsLoaded={(mats) => {
                       updateModelData(model.id, { detectedMaterials: mats });
                       if (model.detectedMaterials.length === 0) {
@@ -1636,6 +1722,10 @@ const App: React.FC = () => {
                     translatedParts={translatedParts}
                     isMobile={isMobile}
                     hoveredPartId={hoveredPartId}
+                    onTexturesProgress={(loaded, total) => {
+                      setTexturesLoaded(loaded);
+                      setTexturesTotal(total);
+                    }}
                     onUVLayoutGenerated={(svg, filename) => {
                       setUvLayoutSvg(svg);
                       setUvLayoutFilename(filename);
