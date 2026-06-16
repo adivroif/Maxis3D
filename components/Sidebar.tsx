@@ -339,12 +339,35 @@ const Sidebar: React.FC<SidebarProps> = ({
           if (sourceFolder === "images" || sourceFolder.toLowerCase().includes("image")) {
             url = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(name)}`;
           } else {
-            url = `/api/files/get-file?folder=${encodeURIComponent(sourceFolder)}&clientName=tenantA&fileName=${encodeURIComponent(name)}&v=3`;
+            // Build the appropriate direct R2 public URL
+            let r2Path = "";
+            if (sourceFolder.startsWith("tenants")) {
+              if (sourceFolder.includes("/")) {
+                r2Path = `${sourceFolder}/${name}`;
+              } else {
+                r2Path = `tenants/tenantA/${name}`;
+              }
+            } else {
+              r2Path = `${sourceFolder}/${name}`;
+            }
+            url = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/${r2Path.split("/").map(encodeURIComponent).join("/")}`;
           }
-        } else if (sourceFolder === "images" || sourceFolder.toLowerCase().includes("image")) {
-          // Force textures to use R2 domain
+        } else {
+          // If the url exists but is not on the R2 public host, rewrite it to R2 public host
           if (!url.includes("pub-")) {
-            url = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(name)}`;
+            let r2Path = "";
+            if (sourceFolder === "images" || sourceFolder.toLowerCase().includes("image")) {
+              r2Path = `images/${name}`;
+            } else if (sourceFolder.startsWith("tenants")) {
+              if (sourceFolder.includes("/")) {
+                r2Path = `${sourceFolder}/${name}`;
+              } else {
+                r2Path = `tenants/tenantA/${name}`;
+              }
+            } else {
+              r2Path = `${sourceFolder}/${name}`;
+            }
+            url = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/${r2Path.split("/").map(encodeURIComponent).join("/")}`;
           }
         }
         return { key, name, url };
