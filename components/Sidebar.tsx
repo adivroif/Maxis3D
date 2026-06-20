@@ -690,14 +690,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                               }`}>
                                 {displayName}
                               </span>
-                              {cachedUrls[file.url] && (
-                                <span 
-                                  className="shrink-0 bg-emerald-50 text-emerald-600 text-[8px] font-black px-1.5 py-0.5 rounded-md leading-none select-none border border-emerald-500/10" 
-                                  title={language === 'he' ? 'שמור לאופליין' : 'Offline Ready'}
-                                >
-                                  ✓ {(language === 'he' ? 'שמור' : 'Cached')}
-                                </span>
-                              )}
                             </div>
                             
                             {/* Like Emoji Button */}
