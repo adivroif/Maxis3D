@@ -26,26 +26,24 @@ function safeDecodeRepeated(value: string): string {
   return current;
 }
 
-function buildR2ProxyUrl(key: string): string {
+function buildR2PublicUrl(key: string): string {
   const decodedKey = safeDecodeRepeated(key.replace(/^\/+/, ''));
-  return `${R2_PROXY_BASE_URL}/api/r2/proxy?key=${encodeURIComponent(decodedKey)}`;
+  // Ensure we don't end up with double slashes
+  const baseUrl = R2_PUBLIC_BASE_URL.endsWith('/') ? R2_PUBLIC_BASE_URL : `${R2_PUBLIC_BASE_URL}/`;
+  return `${baseUrl}${decodedKey}`;
 }
 
 function normalizeTextureLoadUrl(url: string): string {
   if (!url || typeof url !== 'string') return url;
 
-  if (url.startsWith(R2_PUBLIC_BASE_URL)) {
-    return buildR2ProxyUrl(url.substring(R2_PUBLIC_BASE_URL.length));
-  }
-
   try {
     const parsed = new URL(url, 'https://local.invalid');
     if (parsed.pathname === '/api/r2/proxy') {
       const key = parsed.searchParams.get('key');
-      if (key) return buildR2ProxyUrl(key);
+      if (key) return buildR2PublicUrl(key);
     }
   } catch {
-    // Keep the original URL when it is not parseable.
+    // Keep original URL when it is not parseable.
   }
 
   return url;
@@ -357,7 +355,8 @@ export function generateUVSVG(group: THREE.Object3D): string {
     meshName: string;
     uvs: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
     tile: number;
-    triangles: [number, number, number][];
+    index: THREE.BufferAttribute | null;
+    vertexCount: number;
   }[] = [];
   const tilesSet = new Set<number>();
 
@@ -370,23 +369,12 @@ export function generateUVSVG(group: THREE.Object3D): string {
     const tile = detectUDIMTile(geometry) || 1001;
     tilesSet.add(tile);
 
-    const triangles: [number, number, number][] = [];
-    const index = geometry.index;
-    if (index) {
-      for (let i = 0; i < index.count; i += 3) {
-        triangles.push([index.getX(i), index.getX(i + 1), index.getX(i + 2)]);
-      }
-    } else {
-      for (let i = 0; i < uvAttr.count; i += 3) {
-        triangles.push([i, i + 1, i + 2]);
-      }
-    }
-
     tileInfoList.push({
       meshName: mesh.name,
       uvs: uvAttr,
       tile,
-      triangles
+      index: geometry.index as THREE.BufferAttribute | null,
+      vertexCount: uvAttr.count
     });
   });
 
@@ -437,17 +425,31 @@ export function generateUVSVG(group: THREE.Object3D): string {
       svg += `  <g stroke="${strokeColor}" stroke-width="0.5" fill="none" opacity="0.65">\n`;
 
       const uvs = info.uvs;
-      const totalTris = info.triangles.length;
-      const step = totalTris > 1000 ? Math.ceil(totalTris / 1000) : 1;
+      const index = info.index;
+      const vertexCount = info.vertexCount;
+      const totalTris = index ? index.count / 3 : vertexCount / 3;
+
+      // Limit to max 1200 triangles drawn per mesh in the combined layout to prevent HUGE SVGs and CPU blocking!
+      const step = totalTris > 1200 ? Math.ceil(totalTris / 1200) : 1;
 
       for (let i = 0; i < totalTris; i += step) {
-        const tri = info.triangles[i];
-        const u0 = uvs.getX(tri[0]);
-        const v0 = uvs.getY(tri[0]);
-        const u1 = uvs.getX(tri[1]);
-        const v1 = uvs.getY(tri[1]);
-        const u2 = uvs.getX(tri[2]);
-        const v2 = uvs.getY(tri[2]);
+        let idx0, idx1, idx2;
+        if (index) {
+          idx0 = index.getX(i * 3);
+          idx1 = index.getX(i * 3 + 1);
+          idx2 = index.getX(i * 3 + 2);
+        } else {
+          idx0 = i * 3;
+          idx1 = i * 3 + 1;
+          idx2 = i * 3 + 2;
+        }
+
+        const u0 = uvs.getX(idx0);
+        const v0 = uvs.getY(idx0);
+        const u1 = uvs.getX(idx1);
+        const v1 = uvs.getY(idx1);
+        const u2 = uvs.getX(idx2);
+        const v2 = uvs.getY(idx2);
 
         const tU0 = u0 - Math.floor(u0);
         const tV0 = v0 - Math.floor(v0);
@@ -488,17 +490,8 @@ export function generateSingleMeshUVSVG(mesh: THREE.Mesh): string {
   if (uvAttr.count === 0) return '';
 
   const tile = detectUDIMTile(geometry) || 1001;
-  const triangles: [number, number, number][] = [];
-  const index = geometry.index;
-  if (index) {
-    for (let i = 0; i < index.count; i += 3) {
-      triangles.push([index.getX(i), index.getX(i + 1), index.getX(i + 2)]);
-    }
-  } else {
-    for (let i = 0; i < uvAttr.count; i += 3) {
-      triangles.push([i, i + 1, i + 2]);
-    }
-  }
+  const index = geometry.index as THREE.BufferAttribute | null;
+  const vertexCount = uvAttr.count;
 
   const tileSize = 600;
   const padding = 80;
@@ -525,17 +518,28 @@ export function generateSingleMeshUVSVG(mesh: THREE.Mesh): string {
   svg += `  <!-- MESH: ${mesh.name} -->\n`;
   svg += `  <g stroke="#3b82f6" stroke-width="0.75" fill="none" opacity="0.8">\n`;
 
-  const totalTris = triangles.length;
-  const step = totalTris > 1500 ? Math.ceil(totalTris / 1500) : 1;
+  const totalTris = index ? index.count / 3 : vertexCount / 3;
+  // Limit to max 2000 triangles drawn for single mesh layout to keep SVG clean and render-friendly
+  const step = totalTris > 2000 ? Math.ceil(totalTris / 2000) : 1;
 
   for (let i = 0; i < totalTris; i += step) {
-    const tri = triangles[i];
-    const u0 = uvAttr.getX(tri[0]);
-    const v0 = uvAttr.getY(tri[0]);
-    const u1 = uvAttr.getX(tri[1]);
-    const v1 = uvAttr.getY(tri[1]);
-    const u2 = uvAttr.getX(tri[2]);
-    const v2 = uvAttr.getY(tri[2]);
+    let idx0, idx1, idx2;
+    if (index) {
+      idx0 = index.getX(i * 3);
+      idx1 = index.getX(i * 3 + 1);
+      idx2 = index.getX(i * 3 + 2);
+    } else {
+      idx0 = i * 3;
+      idx1 = i * 3 + 1;
+      idx2 = i * 3 + 2;
+    }
+
+    const u0 = uvAttr.getX(idx0);
+    const v0 = uvAttr.getY(idx0);
+    const u1 = uvAttr.getX(idx1);
+    const v1 = uvAttr.getY(idx1);
+    const u2 = uvAttr.getX(idx2);
+    const v2 = uvAttr.getY(idx2);
 
     const tU0 = u0 - Math.floor(u0);
     const tV0 = v0 - Math.floor(v0);
@@ -587,6 +591,7 @@ interface FBXModelProps {
   onPartUVLayoutGenerated?: (meshName: string, svg: string, filename: string) => void;
   onTexturesProgress?: (loaded: number, total: number) => void;
   onFbxLoaded?: () => void;
+  cachedBlobUrls?: Record<string, string>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -603,7 +608,8 @@ const FBXModel: React.FC<FBXModelProps> = ({
   onUVLayoutGenerated,
   onPartUVLayoutGenerated,
   onTexturesProgress,
-  onFbxLoaded
+  onFbxLoaded,
+  cachedBlobUrls = {}
 }) => {
   const originalFbx = useLoader(FBXLoader, url);
 
@@ -827,7 +833,8 @@ const FBXModel: React.FC<FBXModelProps> = ({
           return;
         }
 
-        const loadUrl = normalizeTextureLoadUrl(u);
+        const cachedUrl = cachedBlobUrls[u];
+        const loadUrl = cachedUrl || normalizeTextureLoadUrl(u);
 
         const lo = u.toLowerCase();
         // Inspect if URL points to a TGA/DDS file (handles files served via proxy endpoints with query params)
