@@ -41,6 +41,10 @@ export interface Translations {
   wireframe: string;
   textureResolution?: string;
   textureAnisotropy?: string;
+  offlineCacheTitle?: string;
+  offlineCachePaused?: string;
+  offlineCacheDownloading?: string;
+  offlineCacheDone?: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -84,6 +88,10 @@ export const translations: Record<Language, Translations> = {
     wireframe: "Wireframe mode",
     textureResolution: "Texture Quality / Resolution",
     textureAnisotropy: "Anisotropic Filtering (Sharpness)",
+    offlineCacheTitle: "Offline Content Cache",
+    offlineCachePaused: "Snoozed",
+    offlineCacheDownloading: "Caching Assets...",
+    offlineCacheDone: "Offline Ready",
   },
   he: {
     all: "הכל",
@@ -125,6 +133,10 @@ export const translations: Record<Language, Translations> = {
     wireframe: "תצוגת רשת קווים (Wireframe)",
     textureResolution: "איכות ורזולוציית טקסטורות",
     textureAnisotropy: "סינון אנאיזוטרופי (חדות וטשטוש)",
+    offlineCacheTitle: "תוכן שמור לאופליין",
+    offlineCachePaused: "בהשהייה",
+    offlineCacheDownloading: "שומר קבצים ברקע...",
+    offlineCacheDone: "זמין במלואו לאופליין",
   },
   ar: {
     all: "الكل",
@@ -166,6 +178,10 @@ export const translations: Record<Language, Translations> = {
     wireframe: "مظهر شبكي (Wireframe)",
     textureResolution: "دقة وجودة الأنسجة",
     textureAnisotropy: "تصفية تباين الاتجاهات (مستوى الحدوة)",
+    offlineCacheTitle: "ذاكرة التخزين المؤقت للأوفلاين",
+    offlineCachePaused: "موقوف مؤقتًا",
+    offlineCacheDownloading: "حفظ الكائنات في الخلفية...",
+    offlineCacheDone: "جاهز للعمل دون اتصال",
   },
   ru: {
     all: "Все",
@@ -207,5 +223,9 @@ export const translations: Record<Language, Translations> = {
     wireframe: "Каркасный вид (Wireframe)",
     textureResolution: "Качество и разрешение текстур",
     textureAnisotropy: "Анизотропная фильтрация (Резкость)",
+    offlineCacheTitle: "Офлайн контентный кэш",
+    offlineCachePaused: "На паузе",
+    offlineCacheDownloading: "Кэширование файлов в фоне...",
+    offlineCacheDone: "Полностью доступно офлайн",
   },
 };
