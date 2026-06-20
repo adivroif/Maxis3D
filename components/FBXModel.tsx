@@ -1648,6 +1648,59 @@ const FBXModel: React.FC<FBXModelProps> = ({
     }
   }, [settings.targetPartId, hotspots, onPartClick, scaleFactor, centeringOffset, activePartId]);
 
+  // Extreme Memory leak prevention: Dispose materials & sub-meshes when fbx changes or unmounts
+  useEffect(() => {
+    return () => {
+      if (fbx) {
+        console.log("[FBXModel] 🧹 Unmount / Change cleanup: Disposing instanced model materials and backface passes...");
+        fbx.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            
+            // Dispose backface pass materials and meshes
+            if (mesh.userData?.backFaceMesh) {
+              const bMesh = mesh.userData.backFaceMesh as THREE.Mesh;
+              if (bMesh.material) {
+                const bMats = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
+                bMats.forEach((m) => {
+                  if (m && typeof m.dispose === "function") {
+                    try { m.dispose(); } catch (err) { console.warn("Error disposing backFace Material:", err); }
+                  }
+                });
+              }
+              try { mesh.remove(bMesh); } catch(e) {}
+            }
+            if (mesh.userData?.backFaceMat) {
+              const bMat = mesh.userData.backFaceMat;
+              if (bMat && typeof bMat.dispose === "function") {
+                try { bMat.dispose(); } catch (err) { console.warn("Error disposing backFaceMat userData:", err); }
+              }
+            }
+            
+            // Dispose normal materials assigned to the mesh
+            if (mesh.material) {
+              const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+              mats.forEach((mat) => {
+                if (mat) {
+                  // Dispose maps of the material if they exist
+                  if ((mat as any).map && typeof (mat as any).map.dispose === "function") { try { (mat as any).map.dispose(); } catch (e) {} }
+                  if ((mat as any).normalMap && typeof (mat as any).normalMap.dispose === "function") { try { (mat as any).normalMap.dispose(); } catch (e) {} }
+                  if ((mat as any).roughnessMap && typeof (mat as any).roughnessMap.dispose === "function") { try { (mat as any).roughnessMap.dispose(); } catch (e) {} }
+                  if ((mat as any).metalnessMap && typeof (mat as any).metalnessMap.dispose === "function") { try { (mat as any).metalnessMap.dispose(); } catch (e) {} }
+                  if ((mat as any).alphaMap && typeof (mat as any).alphaMap.dispose === "function") { try { (mat as any).alphaMap.dispose(); } catch (e) {} }
+                  
+                  if (typeof mat.dispose === "function") {
+                    try { mat.dispose(); } catch (err) { console.warn("Error disposing Mesh Material:", err); }
+                  }
+                }
+              });
+            }
+          }
+        });
+      }
+    };
+  }, [fbx]);
+
   if (!fbx) return null;
 
   return (
