@@ -132,9 +132,6 @@ function normalizeR2Key(key: string): string {
   return safeDecodeURIComponent(String(key || "").trim()).replace(/^\/+/, "");
 }
 
-function r2ProxyUrlFromKey(key: string): string {
-  return `/api/r2/proxy?key=${encodeURIComponent(normalizeR2Key(key))}`;
-}
 
 function r2PublicUrlFromKey(key: string): string {
   return `${R2_PUBLIC_BASE_URL}/${normalizeR2Key(key).split("/").map(encodeURIComponent).join("/")}`;
@@ -2325,120 +2322,6 @@ async function startServer() {
     } catch (error: any) {
       console.error("Error in get-images-by-model:", error);
       res.status(500).json({ error: "Failed to fetch images", details: error.message });
-    }
-  });
-
-  // Proxy route to fetch files from R2 and serve them from our domain (bypasses CORS)
-  app.get("/api/r2/proxy", async (req, res) => {
-    let key = Array.isArray(req.query.key) ? req.query.key[0] as string : req.query.key as string;
-    if (!key) return res.status(400).send("Key is required");
-
-    try {
-      key = normalizeR2Key(key);
-
-      const bucket = process.env.R2_BUCKET_NAME;
-      if (!bucket) throw new Error("R2_BUCKET_NAME is not configured");
-
-      const client = getR2Client();
-      if (!client) throw new Error("R2 credentials or Account ID missing");
-
-      const command = new GetObjectCommand({
-        Bucket: bucket,
-        Key: key,
-      });
-
-      console.log(`Proxying R2 file: Bucket=${bucket}, Key=${key}`);
-      const response = await client.send(command);
-      
-      // Set Content-Type from response or fallback based on extension
-      let contentType = response.ContentType;
-      if (!contentType || contentType === 'application/octet-stream') {
-        contentType = getMimeTypeByFileName(key);
-      }
-      
-      res.setHeader("Content-Type", contentType);
-      
-      if (response.ContentLength) {
-        res.setHeader("Content-Length", response.ContentLength.toString());
-      }
-      
-      // Add CORS and aggressive browser caching headers
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Range");
-      res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Type, ETag, Accept-Ranges, Content-Range");
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      res.setHeader("X-Content-Type-Options", "nosniff");
-
-      // Stream the body to the response
-      const body = response.Body as any;
-      if (body && typeof body.pipe === 'function') {
-        try {
-          // Use pipeline to handle the stream and ensure proper cleanup
-          await pipeline(body, res);
-        } catch (streamError: any) {
-          // If headers were already sent, we can't send a 500 error response.
-          if (res.headersSent) {
-            // "Premature close" usually means the client (browser) disconnected before the stream finished.
-            // This is common when navigating or when an image is no longer needed.
-            if (streamError.message === 'Premature close' || streamError.code === 'ERR_STREAM_PREMATURE_CLOSE') {
-              // Log as a warning/info instead of an error to reduce noise
-              console.warn(`Stream for "${key}" was closed prematurely (likely client disconnect)`);
-            } else {
-              console.error(`Stream error after headers sent for "${key}":`, streamError.message);
-            }
-            
-            if (!res.writableEnded) {
-              res.end();
-            }
-          } else {
-            throw streamError;
-          }
-        }
-      } else if (body && typeof body.transformToByteArray === 'function') {
-        const bytes = await body.transformToByteArray();
-        res.send(Buffer.from(bytes));
-      } else if (body && body.getReader) {
-        // Fallback if it's a Web Stream (e.g. in some environments)
-        const reader = body.getReader();
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            res.write(value);
-          }
-          res.end();
-        } catch (readerError: any) {
-          if (res.headersSent) {
-            console.error(`Reader error after headers sent for "${key}":`, readerError.message);
-            res.end();
-          } else {
-            throw readerError;
-          }
-        }
-      } else {
-        if (!res.headersSent) {
-          res.status(500).send("Unsupported body type from R2 response");
-        } else {
-          res.end();
-        }
-      }
-    } catch (error: any) {
-      console.error(`Proxy error for key "${key}":`, error);
-      if (error.stack) console.error(error.stack);
-      
-      if (!res.headersSent) {
-        if (error.name === "NoSuchKey") {
-          res.status(404).send(`File not found in R2: ${key}`);
-        } else {
-          res.status(500).send(`Failed to proxy file: ${error.message}`);
-        }
-      } else {
-        // Headers already sent, just end the response
-        if (!res.writableEnded) {
-          res.end();
-        }
-      }
     }
   });
 
