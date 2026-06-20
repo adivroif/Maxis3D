@@ -448,7 +448,7 @@ const App: React.FC = () => {
       setIsFbxDone(false);
       setSmoothProgress(0);
     }
-  }, [selectedModel?.url]);
+  }, [selectedModel?.id, selectedModel?.url]);
 
   const t = translations[language];
 
