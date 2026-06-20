@@ -106,6 +106,42 @@ const isModelTextureMatch = (fileName: string, modelName: string): boolean => {
   return !isAlphanumeric;
 };
 
+interface PrefetchItem {
+  url: string;
+  type: 'fbx' | 'texture';
+  modelName: string;
+  name: string;
+}
+
+async function fetchWithProgress(url: string, onProgress: (loaded: number, total: number) => void): Promise<Blob> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+  
+  const contentLength = response.headers.get('content-length');
+  const total = contentLength ? parseInt(contentLength, 10) : 0;
+  
+  if (!response.body || total === 0) {
+    const blob = await response.blob();
+    onProgress(blob.size, blob.size);
+    return blob;
+  }
+  
+  const reader = response.body.getReader();
+  let loaded = 0;
+  const chunks: Uint8Array[] = [];
+  
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      loaded += value.length;
+      onProgress(loaded, total);
+    }
+  }
+  
+  return new Blob(chunks);
+}
 
 
 const App: React.FC = () => {
@@ -145,6 +181,251 @@ const App: React.FC = () => {
   const [texturesTotal, setTexturesTotal] = useState(-1);
   const [isFbxDone, setIsFbxDone] = useState(false);
   const [smoothProgress, setSmoothProgress] = useState(0);
+
+  // Background prefetching / caching states
+  const [cachedUrls, setCachedUrls] = useState<Record<string, boolean>>({});
+  const [activeModelBlobUrls, setActiveModelBlobUrls] = useState<Record<string, string>>({});
+  const [prefetchQueue, setPrefetchQueue] = useState<PrefetchItem[]>([]);
+  const [currentPrefetchIndex, setCurrentPrefetchIndex] = useState(-1);
+  const [isPrefetchPaused, setIsPrefetchPaused] = useState(false);
+  const [currentPrefetchProgress, setCurrentPrefetchProgress] = useState(0);
+  const [prefetchSummary, setPrefetchSummary] = useState({ loaded: 0, total: 0 });
+  const isPrefetchingActive = useRef(false);
+
+  // Derive model fully loaded state checks mapped above our hooks to safely prevent closures locking onto stale body evaluations
+  const isTargetFullyLoaded = isFbxDone && texturesTotal >= 0 && (texturesTotal === 0 || texturesLoaded >= texturesTotal);
+  const isModelFullyLoaded = isTargetFullyLoaded && smoothProgress >= 99.9;
+
+  // 1. Initial Cache storage loader - queries keys without instantiating massive Object URLs in RAM
+  useEffect(() => {
+    const loadExistingCache = async () => {
+      try {
+        const cache = await caches.open('model-assets-cache');
+        const keys = await cache.keys();
+        const mappings: Record<string, boolean> = {};
+        
+        console.log(`[CacheLoader] Found ${keys.length} raw cache records. Storing lightweight offline index...`);
+        
+        for (const req of keys) {
+          mappings[req.url] = true;
+        }
+        
+        setCachedUrls(mappings);
+      } catch (err) {
+        console.warn('[CacheLoader] Error loading initial Cache Storage keys:', err);
+      }
+    };
+    
+    loadExistingCache();
+  }, []);
+
+  // 2. Queue builder when catalog files and textures are ready
+  useEffect(() => {
+    if (catalogFiles.length === 0) return;
+    
+    const queue: PrefetchItem[] = [];
+    
+    catalogFiles.forEach(file => {
+      const originalDisplayName = file.name.replace(/\.fbx$/i, '');
+      
+      // FBX Model itself
+      queue.push({
+        url: file.url,
+        type: 'fbx',
+        modelName: originalDisplayName,
+        name: file.name
+      });
+      
+      // Related Textures
+      const matchingTextures = catalogTextures.filter(tex => isModelTextureMatch(tex.name, originalDisplayName));
+      matchingTextures.forEach(tex => {
+        queue.push({
+          url: tex.url,
+          type: 'texture',
+          modelName: originalDisplayName,
+          name: tex.name
+        });
+      });
+    });
+    
+    setPrefetchQueue(queue);
+    setPrefetchSummary({ loaded: 0, total: queue.length });
+    setCurrentPrefetchIndex(0);
+  }, [catalogFiles, catalogTextures]);
+
+  // 3. Sequentially process next prefetch queue item - purely writing to cache storage, not generating Memory Blobs
+  useEffect(() => {
+    let active = true;
+    
+    const processNextQueueItem = async () => {
+      if (!active) return;
+      
+      // Freeze caching entirely if an active model is busy loading (maximizing IO and CPU for interactive render)
+      const isModelLoading = catalogFiles.length > 0 && !isModelFullyLoaded;
+      
+      if (isPrefetchPaused || isModelLoading || currentPrefetchIndex < 0 || currentPrefetchIndex >= prefetchQueue.length) {
+        isPrefetchingActive.current = false;
+        return;
+      }
+      
+      if (isPrefetchingActive.current) return;
+      isPrefetchingActive.current = true;
+      
+      const item = prefetchQueue[currentPrefetchIndex];
+      
+      // Skip download if we already verified caching
+      if (cachedUrls[item.url]) {
+        setPrefetchSummary(prev => ({ ...prev, loaded: Math.min(prev.loaded + 1, prev.total) }));
+        isPrefetchingActive.current = false;
+        setCurrentPrefetchIndex(prev => prev + 1);
+        return;
+      }
+      
+      // Skip download if it's in Cache Storage but just not in cachedUrls yet
+      try {
+        const cache = await caches.open('model-assets-cache');
+        const matched = await cache.match(item.url);
+        if (matched) {
+          setCachedUrls(prev => ({ ...prev, [item.url]: true }));
+          setPrefetchSummary(prev => ({ ...prev, loaded: Math.min(prev.loaded + 1, prev.total) }));
+          isPrefetchingActive.current = false;
+          setCurrentPrefetchIndex(prev => prev + 1);
+          return;
+        }
+      } catch (e) {
+        console.warn('[Prefetch] Match error:', e);
+      }
+      
+      // Perform progressive background fetch
+      try {
+        console.log(`[Prefetch] Background fetch: ${item.name} (${currentPrefetchIndex + 1}/${prefetchQueue.length})`);
+        setCurrentPrefetchProgress(0);
+        
+        const blob = await fetchWithProgress(item.url, (loaded, total) => {
+          if (!active) return;
+          const progress = total > 0 ? Math.round((loaded / total) * 100) : 0;
+          setCurrentPrefetchProgress(progress);
+        });
+        
+        if (!active) return;
+        
+        const cache = await caches.open('model-assets-cache');
+        const responseToCache = new Response(blob, {
+          headers: {
+            'Content-Type': item.type === 'fbx' ? 'application/octet-stream' : 'image/jpeg',
+            'Content-Length': blob.size.toString()
+          }
+        });
+        await cache.put(item.url, responseToCache);
+        
+        setCachedUrls(prev => ({ ...prev, [item.url]: true }));
+        setPrefetchSummary(prev => ({ ...prev, loaded: Math.min(prev.loaded + 1, prev.total) }));
+        
+        console.log(`[Prefetch] Completed and cached locally to offline disk storage: ${item.name}`);
+      } catch (err) {
+        console.error(`[Prefetch] Failed caching item ${item.name}:`, err);
+      } finally {
+        if (active) {
+          isPrefetchingActive.current = false;
+          setCurrentPrefetchProgress(0);
+          setCurrentPrefetchIndex(prev => prev + 1);
+        }
+      }
+    };
+    
+    // Give browser a tiny 1-sec breath before sequentially starting background queue task
+    const timer = setTimeout(() => {
+      processNextQueueItem();
+    }, 1000);
+    
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [prefetchQueue, currentPrefetchIndex, isPrefetchPaused, isModelFullyLoaded, cachedUrls, catalogFiles.length]);
+
+  // 4. Resolve Cache to Object URLs for ONLY the active models in the scene (prevents OOM / crashes)
+  useEffect(() => {
+    let active = true;
+    const oldActiveBlobUrls = { ...activeModelBlobUrls };
+
+    const resolveActiveModels = async () => {
+      if (models.length === 0) {
+        if (active) setActiveModelBlobUrls({});
+        // Revoke all prior active object URLs
+        Object.values(oldActiveBlobUrls).forEach(url => {
+          try { URL.revokeObjectURL(url); } catch (e) { console.warn('Error revoking URL:', e); }
+        });
+        return;
+      }
+
+      const cache = await caches.open('model-assets-cache');
+      const newBlobUrls: Record<string, string> = {};
+
+      for (const model of models) {
+        // Resolve FBX model structure
+        try {
+          if (oldActiveBlobUrls[model.url]) {
+            newBlobUrls[model.url] = oldActiveBlobUrls[model.url];
+          } else {
+            const matched = await cache.match(model.url);
+            if (matched) {
+              const blob = await matched.blob();
+              newBlobUrls[model.url] = URL.createObjectURL(blob);
+              console.log(`[CacheResolver] Resolved active scene model FBX to memory: ${model.name}`);
+            }
+          }
+        } catch (e) {
+          console.warn('[CacheResolver] Match error or file not yet cached for FBX:', model.url, e);
+        }
+
+        // Resolve textures for this specific model
+        const originalDisplayName = model.name.replace(/\.fbx$/i, '');
+        const matchingTextures = catalogTextures.filter(tex => isModelTextureMatch(tex.name, originalDisplayName));
+
+        for (const tex of matchingTextures) {
+          try {
+            if (oldActiveBlobUrls[tex.url]) {
+              newBlobUrls[tex.url] = oldActiveBlobUrls[tex.url];
+            } else {
+              const matched = await cache.match(tex.url);
+              if (matched) {
+                const blob = await matched.blob();
+                newBlobUrls[tex.url] = URL.createObjectURL(blob);
+              }
+            }
+          } catch (e) {
+            console.warn('[CacheResolver] Match error or texture not yet cached:', tex.url, e);
+          }
+        }
+      }
+
+      if (!active) {
+        // Clean up any newly instantiated Object URLs if component was aborted
+        Object.keys(newBlobUrls).forEach(url => {
+          if (!oldActiveBlobUrls[url]) {
+            try { URL.revokeObjectURL(newBlobUrls[url]); } catch (e) { console.warn('Error revoking URL:', e); }
+          }
+        });
+        return;
+      }
+
+      // Identify and revoke obsoleted active blob URLs to completely free up memory immediately
+      Object.keys(oldActiveBlobUrls).forEach(url => {
+        if (!newBlobUrls[url]) {
+          try { URL.revokeObjectURL(oldActiveBlobUrls[url]); } catch (e) { console.warn('Error revoking URL:', e); }
+        }
+      });
+
+      setActiveModelBlobUrls(newBlobUrls);
+    };
+
+    resolveActiveModels();
+
+    return () => {
+      active = false;
+    };
+  }, [models, catalogTextures]);
 
   useEffect(() => {
     // Safely subscribe to global Drei loader progress outside the React render path 
@@ -1494,8 +1775,6 @@ const App: React.FC = () => {
     return () => cancelAnimationFrame(rAF);
   }, [unifiedProgress]);
 
-  const isTargetFullyLoaded = isFbxDone && texturesTotal >= 0 && (texturesTotal === 0 || texturesLoaded >= texturesTotal);
-  const isModelFullyLoaded = isTargetFullyLoaded && smoothProgress >= 99.9;
   const showModelLoadingScreen = !!selectedModel && !isModelFullyLoaded;
 
   return (
@@ -1634,7 +1913,7 @@ const App: React.FC = () => {
       <div className={`absolute inset-0 z-10 transition-colors duration-1000 ${isNightMode ? 'bg-zinc-800/50' : 'bg-transparent'}`}>
         
         {showModelLoadingScreen && (
-          <div className="absolute inset-0 z-40 bg-stone-50/90 backdrop-blur-md dark:bg-zinc-950/90 flex flex-col items-center justify-center animate-in fade-in duration-300">
+          <div className="absolute inset-0 z-40 bg-stone-50/98 backdrop-blur-xl dark:bg-zinc-950/98 flex flex-col items-center justify-center animate-in fade-in duration-300">
             {/* Elegant Circular Progress Loader with percentages and continuous rotation */}
             <div className="relative w-28 h-28 flex items-center justify-center">
               {/* Spinning/progress SVG circle - spinning continuously */}
@@ -1708,7 +1987,7 @@ const App: React.FC = () => {
               <Environment preset={envPreset as any} />
             )}
             {models.map((model) => (
-              <group key={model.id} position={model.position} visible={isModelFullyLoaded} onPointerDown={(e) => { e.stopPropagation(); if (selectedId !== model.id) setSelectedId(model.id); }}>
+              <group key={model.id} position={model.position} visible={true} onPointerDown={(e) => { e.stopPropagation(); if (selectedId !== model.id) setSelectedId(model.id); }}>
                 <ModelErrorBoundary
                   modelName={model.name}
                   language={language}
@@ -1722,7 +2001,7 @@ const App: React.FC = () => {
                   }}
                 >
                   <FBXModel 
-                    url={model.url} 
+                    url={activeModelBlobUrls[model.url] || model.url} 
                     settings={model.settings} 
                     textureSets={model.textureSets}
                     modelParts={modelParts}
@@ -1761,6 +2040,7 @@ const App: React.FC = () => {
                         [meshName]: { svg, filename }
                       }));
                     }}
+                    cachedBlobUrls={activeModelBlobUrls}
                   />
                 </ModelErrorBoundary>
               </group>
@@ -2212,6 +2492,11 @@ const App: React.FC = () => {
             isMobile={isMobile}
             catalogFiles={catalogFiles}
             isLoadingCatalog={isLoadingCatalog}
+            cachedUrls={cachedUrls}
+            prefetchSummary={prefetchSummary}
+            isPrefetchPaused={isPrefetchPaused}
+            currentPrefetchFile={prefetchQueue[currentPrefetchIndex]?.name || ''}
+            onTogglePrefetchPause={() => setIsPrefetchPaused(prev => !prev)}
           />
         </div>
       </div>
