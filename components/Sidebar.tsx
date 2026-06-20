@@ -16,6 +16,11 @@ interface SidebarProps {
   isMobile?: boolean;
   catalogFiles: any[];
   isLoadingCatalog: boolean;
+  cachedUrls?: Record<string, boolean>;
+  prefetchSummary?: { loaded: number; total: number };
+  isPrefetchPaused?: boolean;
+  currentPrefetchFile?: string;
+  onTogglePrefetchPause?: () => void;
 }
 
 const isModelTextureMatch = (fileName: string, modelName: string): boolean => {
@@ -50,7 +55,12 @@ const isModelTextureMatch = (fileName: string, modelName: string): boolean => {
 
 const Sidebar: React.FC<SidebarProps> = ({ 
   models, selectedId, onSelect, onAddFile, onRemove, onAddFromUrl, language, isMobile = false,
-  catalogFiles, isLoadingCatalog
+  catalogFiles, isLoadingCatalog,
+  cachedUrls = {},
+  prefetchSummary = { loaded: 0, total: 0 },
+  isPrefetchPaused = false,
+  currentPrefetchFile = '',
+  onTogglePrefetchPause = () => {}
 }) => {
   const [r2Files, setR2Files] = React.useState<any[]>([]);
   const [r2Textures, setR2Textures] = React.useState<any[]>([]);
@@ -571,6 +581,69 @@ const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
 
+          {/* OFFLINE BACKGROUND PREFETCH STATUS CONTROLLER */}
+          {prefetchSummary.total > 0 && (
+            <div className="mb-6 bg-white rounded-2xl p-4 border border-black/5 flex flex-col gap-3 shadow-sm animate-in fade-in duration-500">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${
+                    isPrefetchPaused 
+                      ? 'bg-amber-400' 
+                      : prefetchSummary.loaded >= prefetchSummary.total
+                        ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+                        : 'bg-blue-500 animate-pulse'
+                  }`} />
+                  <span className="text-[10px] font-black uppercase tracking-wider text-zinc-600">
+                    {t.offlineCacheTitle}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTogglePrefetchPause();
+                  }}
+                  className="px-2.5 py-1 rounded-lg border border-black/5 bg-zinc-50 hover:bg-zinc-100 text-[9px] font-black uppercase tracking-wider text-zinc-600 transition-all cursor-pointer"
+                >
+                  {isPrefetchPaused ? (language === 'he' ? 'המשך' : 'Resume') : (language === 'he' ? 'השהה ברקע' : 'Pause')}
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex justify-between items-baseline gap-2 min-w-0">
+                  <span className="text-[9px] font-extrabold text-zinc-400 truncate flex-1 leading-none">
+                    {prefetchSummary.loaded >= prefetchSummary.total ? (
+                      <span className="text-emerald-600 font-bold">{t.offlineCacheDone}</span>
+                    ) : isPrefetchPaused ? (
+                      <span className="text-amber-500 font-bold">{t.offlineCachePaused}</span>
+                    ) : currentPrefetchFile ? (
+                      <span className="text-zinc-500 font-medium">
+                        {t.offlineCacheDownloading} ({currentPrefetchFile})
+                      </span>
+                    ) : (
+                      'Preparing queue...'
+                    )}
+                  </span>
+                  <span className="text-[10px] font-mono font-bold text-zinc-500 shrink-0 leading-none">
+                    {prefetchSummary.loaded}/{prefetchSummary.total}
+                  </span>
+                </div>
+                <div className="w-full h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      prefetchSummary.loaded >= prefetchSummary.total
+                        ? 'bg-emerald-500'
+                        : isPrefetchPaused
+                          ? 'bg-amber-400'
+                          : 'bg-blue-500'
+                    }`}
+                    style={{ width: `${prefetchSummary.total > 0 ? Math.round((prefetchSummary.loaded / prefetchSummary.total) * 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-center mb-6">
             <div className="flex bg-zinc-200/50 p-1 rounded-xl">
               <button 
@@ -674,11 +747,21 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                         <div className="flex flex-col gap-1 min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-1 w-full">
-                            <span className={`text-[12px] font-black uppercase tracking-wider transition-colors leading-tight ${
-                              isOutOfStock ? 'text-zinc-400 line-through decoration-red-500/50 decoration-2' : 'text-zinc-800 group-hover:text-yellow-600'
-                            }`}>
-                              {displayName}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                              <span className={`text-[12px] font-black uppercase tracking-wider transition-colors leading-tight truncate ${
+                                isOutOfStock ? 'text-zinc-400 line-through decoration-red-500/50 decoration-2' : 'text-zinc-800 group-hover:text-yellow-600'
+                              }`}>
+                                {displayName}
+                              </span>
+                              {cachedUrls[file.url] && (
+                                <span 
+                                  className="shrink-0 bg-emerald-50 text-emerald-600 text-[8px] font-black px-1.5 py-0.5 rounded-md leading-none select-none border border-emerald-500/10" 
+                                  title={language === 'he' ? 'שמור לאופליין' : 'Offline Ready'}
+                                >
+                                  ✓ {(language === 'he' ? 'שמור' : 'Cached')}
+                                </span>
+                              )}
+                            </div>
                             
                             {/* Like Emoji Button */}
                             {productIds[normalizedName] && (
@@ -801,11 +884,21 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                               <div className="flex flex-col gap-1 min-w-0 flex-1">
                                 <div className="flex items-start justify-between gap-1 w-full">
-                                  <span className={`text-[12px] font-black uppercase tracking-wider transition-colors leading-tight ${
-                                    isOutOfStock ? 'text-zinc-400 line-through decoration-red-500/50 decoration-2' : 'text-zinc-800 group-hover:text-yellow-600'
-                                  }`}>
-                                    {displayName}
-                                  </span>
+                                  <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                    <span className={`text-[12px] font-black uppercase tracking-wider transition-colors leading-tight truncate ${
+                                      isOutOfStock ? 'text-zinc-400 line-through decoration-red-500/50 decoration-2' : 'text-zinc-800 group-hover:text-yellow-600'
+                                    }`}>
+                                      {displayName}
+                                    </span>
+                                    {cachedUrls[file.url] && (
+                                      <span 
+                                        className="shrink-0 bg-emerald-50 text-emerald-600 text-[8px] font-black px-1.5 py-0.5 rounded-md leading-none select-none border border-emerald-500/10" 
+                                        title={language === 'he' ? 'שמור לאופליין' : 'Offline Ready'}
+                                      >
+                                        ✓ {(language === 'he' ? 'שמור' : 'Cached')}
+                                      </span>
+                                    )}
+                                  </div>
                                   
                                   {/* Like Emoji Button */}
                                   {productIds[normalizedName] && (
