@@ -9,6 +9,46 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import '../types';
 import { MaterialSettings, ModelPart, TextureSet } from '../types';
 
+const R2_PUBLIC_BASE_URL = 'https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/';
+const R2_PROXY_BASE_URL = '';
+
+function safeDecodeRepeated(value: string): string {
+  let current = value;
+  for (let i = 0; i < 4; i++) {
+    try {
+      const next = decodeURIComponent(current);
+      if (next === current) break;
+      current = next;
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
+function buildR2PublicUrl(key: string): string {
+  const decodedKey = safeDecodeRepeated(key.replace(/^\/+/, ''));
+  // Ensure we don't end up with double slashes
+  const baseUrl = R2_PUBLIC_BASE_URL.endsWith('/') ? R2_PUBLIC_BASE_URL : `${R2_PUBLIC_BASE_URL}/`;
+  return `${baseUrl}${decodedKey}`;
+}
+
+function normalizeTextureLoadUrl(url: string): string {
+  if (!url || typeof url !== 'string') return url;
+
+  try {
+    const parsed = new URL(url, 'https://local.invalid');
+    if (parsed.pathname === '/api/r2/proxy') {
+      const key = parsed.searchParams.get('key');
+      if (key) return buildR2PublicUrl(key);
+    }
+  } catch {
+    // Keep original URL when it is not parseable.
+  }
+
+  return url;
+}
+
 /**
  * Automatically generates planar/box UV coordinates based on dominant normals for geometries that lack them
  * or have dummy/corrupted UV coordinates (all zero or all identical) to prevent rendering them completely black.
@@ -315,7 +355,8 @@ export function generateUVSVG(group: THREE.Object3D): string {
     meshName: string;
     uvs: THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
     tile: number;
-    triangles: [number, number, number][];
+    index: THREE.BufferAttribute | null;
+    vertexCount: number;
   }[] = [];
   const tilesSet = new Set<number>();
 
@@ -328,23 +369,12 @@ export function generateUVSVG(group: THREE.Object3D): string {
     const tile = detectUDIMTile(geometry) || 1001;
     tilesSet.add(tile);
 
-    const triangles: [number, number, number][] = [];
-    const index = geometry.index;
-    if (index) {
-      for (let i = 0; i < index.count; i += 3) {
-        triangles.push([index.getX(i), index.getX(i + 1), index.getX(i + 2)]);
-      }
-    } else {
-      for (let i = 0; i < uvAttr.count; i += 3) {
-        triangles.push([i, i + 1, i + 2]);
-      }
-    }
-
     tileInfoList.push({
       meshName: mesh.name,
       uvs: uvAttr,
       tile,
-      triangles
+      index: geometry.index as THREE.BufferAttribute | null,
+      vertexCount: uvAttr.count
     });
   });
 
@@ -395,17 +425,31 @@ export function generateUVSVG(group: THREE.Object3D): string {
       svg += `  <g stroke="${strokeColor}" stroke-width="0.5" fill="none" opacity="0.65">\n`;
 
       const uvs = info.uvs;
-      const totalTris = info.triangles.length;
-      const step = totalTris > 1000 ? Math.ceil(totalTris / 1000) : 1;
+      const index = info.index;
+      const vertexCount = info.vertexCount;
+      const totalTris = index ? index.count / 3 : vertexCount / 3;
+
+      // Limit to max 1200 triangles drawn per mesh in the combined layout to prevent HUGE SVGs and CPU blocking!
+      const step = totalTris > 1200 ? Math.ceil(totalTris / 1200) : 1;
 
       for (let i = 0; i < totalTris; i += step) {
-        const tri = info.triangles[i];
-        const u0 = uvs.getX(tri[0]);
-        const v0 = uvs.getY(tri[0]);
-        const u1 = uvs.getX(tri[1]);
-        const v1 = uvs.getY(tri[1]);
-        const u2 = uvs.getX(tri[2]);
-        const v2 = uvs.getY(tri[2]);
+        let idx0, idx1, idx2;
+        if (index) {
+          idx0 = index.getX(i * 3);
+          idx1 = index.getX(i * 3 + 1);
+          idx2 = index.getX(i * 3 + 2);
+        } else {
+          idx0 = i * 3;
+          idx1 = i * 3 + 1;
+          idx2 = i * 3 + 2;
+        }
+
+        const u0 = uvs.getX(idx0);
+        const v0 = uvs.getY(idx0);
+        const u1 = uvs.getX(idx1);
+        const v1 = uvs.getY(idx1);
+        const u2 = uvs.getX(idx2);
+        const v2 = uvs.getY(idx2);
 
         const tU0 = u0 - Math.floor(u0);
         const tV0 = v0 - Math.floor(v0);
@@ -446,17 +490,8 @@ export function generateSingleMeshUVSVG(mesh: THREE.Mesh): string {
   if (uvAttr.count === 0) return '';
 
   const tile = detectUDIMTile(geometry) || 1001;
-  const triangles: [number, number, number][] = [];
-  const index = geometry.index;
-  if (index) {
-    for (let i = 0; i < index.count; i += 3) {
-      triangles.push([index.getX(i), index.getX(i + 1), index.getX(i + 2)]);
-    }
-  } else {
-    for (let i = 0; i < uvAttr.count; i += 3) {
-      triangles.push([i, i + 1, i + 2]);
-    }
-  }
+  const index = geometry.index as THREE.BufferAttribute | null;
+  const vertexCount = uvAttr.count;
 
   const tileSize = 600;
   const padding = 80;
@@ -483,17 +518,28 @@ export function generateSingleMeshUVSVG(mesh: THREE.Mesh): string {
   svg += `  <!-- MESH: ${mesh.name} -->\n`;
   svg += `  <g stroke="#3b82f6" stroke-width="0.75" fill="none" opacity="0.8">\n`;
 
-  const totalTris = triangles.length;
-  const step = totalTris > 1500 ? Math.ceil(totalTris / 1500) : 1;
+  const totalTris = index ? index.count / 3 : vertexCount / 3;
+  // Limit to max 2000 triangles drawn for single mesh layout to keep SVG clean and render-friendly
+  const step = totalTris > 2000 ? Math.ceil(totalTris / 2000) : 1;
 
   for (let i = 0; i < totalTris; i += step) {
-    const tri = triangles[i];
-    const u0 = uvAttr.getX(tri[0]);
-    const v0 = uvAttr.getY(tri[0]);
-    const u1 = uvAttr.getX(tri[1]);
-    const v1 = uvAttr.getY(tri[1]);
-    const u2 = uvAttr.getX(tri[2]);
-    const v2 = uvAttr.getY(tri[2]);
+    let idx0, idx1, idx2;
+    if (index) {
+      idx0 = index.getX(i * 3);
+      idx1 = index.getX(i * 3 + 1);
+      idx2 = index.getX(i * 3 + 2);
+    } else {
+      idx0 = i * 3;
+      idx1 = i * 3 + 1;
+      idx2 = i * 3 + 2;
+    }
+
+    const u0 = uvAttr.getX(idx0);
+    const v0 = uvAttr.getY(idx0);
+    const u1 = uvAttr.getX(idx1);
+    const v1 = uvAttr.getY(idx1);
+    const u2 = uvAttr.getX(idx2);
+    const v2 = uvAttr.getY(idx2);
 
     const tU0 = u0 - Math.floor(u0);
     const tV0 = v0 - Math.floor(v0);
@@ -543,6 +589,9 @@ interface FBXModelProps {
   hoveredPartId?: string | null;
   onUVLayoutGenerated?: (svg: string, filename: string) => void;
   onPartUVLayoutGenerated?: (meshName: string, svg: string, filename: string) => void;
+  onTexturesProgress?: (loaded: number, total: number) => void;
+  onFbxLoaded?: () => void;
+  cachedBlobUrls?: Record<string, string>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -557,7 +606,10 @@ const FBXModel: React.FC<FBXModelProps> = ({
   translatedParts = {}, isMobile = false,
   hoveredPartId = null,
   onUVLayoutGenerated,
-  onPartUVLayoutGenerated
+  onPartUVLayoutGenerated,
+  onTexturesProgress,
+  onFbxLoaded,
+  cachedBlobUrls = {}
 }) => {
   const originalFbx = useLoader(FBXLoader, url);
 
@@ -567,12 +619,16 @@ const FBXModel: React.FC<FBXModelProps> = ({
   const onAnimationsDetectedRef = useRef(onAnimationsDetected);
   const onUVLayoutGeneratedRef = useRef(onUVLayoutGenerated);
   const onPartUVLayoutGeneratedRef = useRef(onPartUVLayoutGenerated);
+  const onTexturesProgressRef = useRef(onTexturesProgress);
+  const onFbxLoadedRef = useRef(onFbxLoaded);
 
   useEffect(() => { onMaterialsLoadedRef.current = onMaterialsLoaded; }, [onMaterialsLoaded]);
   useEffect(() => { onMeshesLoadedRef.current = onMeshesLoaded; }, [onMeshesLoaded]);
   useEffect(() => { onAnimationsDetectedRef.current = onAnimationsDetected; }, [onAnimationsDetected]);
+  useEffect(() => { onTexturesProgressRef.current = onTexturesProgress; }, [onTexturesProgress]);
   useEffect(() => { onUVLayoutGeneratedRef.current = onUVLayoutGenerated; }, [onUVLayoutGenerated]);
   useEffect(() => { onPartUVLayoutGeneratedRef.current = onPartUVLayoutGenerated; }, [onPartUVLayoutGenerated]);
+  useEffect(() => { onFbxLoadedRef.current = onFbxLoaded; }, [onFbxLoaded]);
 
   const fbx = useMemo(() => {
     const clone = SkeletonUtils.clone(originalFbx);
@@ -628,6 +684,15 @@ const FBXModel: React.FC<FBXModelProps> = ({
     return clone;
   }, [originalFbx]);
 
+  useEffect(() => {
+    if (fbx && onFbxLoadedRef.current) {
+      const cb = onFbxLoadedRef.current;
+      setTimeout(() => {
+        cb();
+      }, 0);
+    }
+  }, [fbx]);
+
   const mixer = useMemo(() => fbx ? new THREE.AnimationMixer(fbx) : null, [fbx]);
   const actions = useMemo(() => {
     const res: { [key: string]: THREE.AnimationAction } = {};
@@ -649,27 +714,29 @@ const FBXModel: React.FC<FBXModelProps> = ({
   const rootPos = useRef(new THREE.Vector3());
   const rootRot = useRef(new THREE.Euler());
   const rootScale = useRef(new THREE.Vector3(1, 1, 1));
-  const [internalExplodeFactor, setInternalExplodeFactor] = useState(0);
+  const internalExplodeFactorRef = useRef(0);
   const prevPlayingRef = useRef(false);
   const accumulatorRef = useRef(0);
   const frameTime = 1 / 25;
   const prevDirectionRef = useRef(settings.animationDirection);
 
-  // ── Collect ALL texture URLs from textureSets + legacy settings ──────────
-  useEffect(() => {
-    let active = true;
+  const entryProgressRef = useRef(0);
+  const outerGroupRef = useRef<THREE.Group>(null);
 
-    // Use a Set to deduplicate URLs within this same effect run,
-    // AND check textureCacheRef to skip already-loaded ones.
+  useEffect(() => {
+    entryProgressRef.current = 0;
+  }, [url, fbx]);
+
+  // ── Compute full serialized list of all texture URLs needed for the model ──
+  const textureUrlsKey = useMemo(() => {
     const seen = new Set<string>();
-    const toLoad: { url: string; isColor: boolean }[] = [];
+    const urls: { url: string; isColor: boolean }[] = [];
 
     const add = (u: unknown, isColor: boolean) => {
       if (!u || typeof u !== 'string') return;
-      if (textureCacheRef.current[u]) return; // already loaded
-      if (seen.has(u)) return;                // duplicate in this batch
+      if (seen.has(u)) return;
       seen.add(u);
-      toLoad.push({ url: u, isColor });
+      urls.push({ url: u, isColor });
     };
 
     // New textureSets API
@@ -695,13 +762,67 @@ const FBXModel: React.FC<FBXModelProps> = ({
     Object.values(settings.heightMappings || {}).forEach(u => add(u, false));
     Object.values(settings.specularMappings || {}).forEach(u => add(u, false));
 
-    console.log(`[FBXModel] 📦 Queuing ${toLoad.length} unique textures to load (sequential/batch concurrency queue)`);
+    // Preload ALL texture mappings from color variants to enable instant material switching
+    if (settings.colorVariants && Array.isArray(settings.colorVariants)) {
+      settings.colorVariants.forEach(variant => {
+        if (variant.mappings) {
+          Object.values(variant.mappings || {}).forEach(u => add(u, true));
+        }
+        if (variant.normalMappings) {
+          Object.values(variant.normalMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.metalMappings) {
+          Object.values(variant.metalMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.roughMappings) {
+          Object.values(variant.roughMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.alphaMappings) {
+          Object.values(variant.alphaMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.emissiveMappings) {
+          Object.values(variant.emissiveMappings || {}).forEach(u => add(u, true));
+        }
+        if (variant.aoMappings) {
+          Object.values(variant.aoMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.heightMappings) {
+          Object.values(variant.heightMappings || {}).forEach(u => add(u, false));
+        }
+        if (variant.specularMappings) {
+          Object.values(variant.specularMappings || {}).forEach(u => add(u, false));
+        }
+      });
+    }
+
+    return JSON.stringify(urls);
+  }, [textureSets, settings.materialMappings, settings.normalMappings, settings.metalMappings, settings.roughMappings, settings.alphaMappings, settings.emissiveMappings, settings.aoMappings, settings.heightMappings, settings.specularMappings, settings.colorVariants]);
+
+  // ── Pre-load the remaining textures in a controlled background queue ───────
+  useEffect(() => {
+    let active = true;
+
+    // Parse the full target texture URLs list
+    const allUrls: { url: string; isColor: boolean }[] = JSON.parse(textureUrlsKey);
+
+    // Only load ones that aren't already cache-hits
+    const toLoad = allUrls.filter(item => !textureCacheRef.current[item.url]);
+
+    console.log(`[FBXModel] 📦 Queuing ${toLoad.length} unique textures to load (sequential/batch queue)`);
+
+    if (onTexturesProgressRef.current) {
+      const cb = onTexturesProgressRef.current;
+      const totalCount = toLoad.length;
+      setTimeout(() => {
+        cb(0, totalCount);
+      }, 0);
+    }
 
     if (toLoad.length === 0) return;
 
     // Controlled queue execution to prevent WebGL/Browser freezing under heavy parallel decode load
     let currentIndex = 0;
-    const activeLoadsLimit = 2; // Process maximum 2 textures concurrently
+    const activeLoadsLimit = 8; // Process up to 8 textures concurrently to speed up loading and match browser network pipelines
 
     const loadSingleTexture = ({ url: u, isColor }: { url: string; isColor: boolean }): Promise<void> => {
       return new Promise<void>((resolve) => {
@@ -712,12 +833,8 @@ const FBXModel: React.FC<FBXModelProps> = ({
           return;
         }
 
-        let loadUrl = u;
-        if (u.startsWith('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/')) {
-          const keyPath = u.substring('https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/'.length);
-          loadUrl = `/api/r2/proxy?key=${encodeURIComponent(keyPath)}`;
-          console.log(`[FBXModel] Intercepted CORS-blocked R2 texture URL at load-time and proxied: "${u}" -> "${loadUrl}"`);
-        }
+        const cachedUrl = cachedBlobUrls[u];
+        const loadUrl = cachedUrl || normalizeTextureLoadUrl(u);
 
         const lo = u.toLowerCase();
         // Inspect if URL points to a TGA/DDS file (handles files served via proxy endpoints with query params)
@@ -735,42 +852,59 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
         if (isTgaFile || isDdsFile) {
           let loader: any = isTgaFile ? tgaLoader.current : ddsLoader.current;
-          loader.load(loadUrl, (tex: THREE.Texture) => {
-            if (!active) {
-              tex.dispose();
+          let triedDirect = false;
+          let currentLoadUrl = loadUrl;
+
+          const executeLoad = (targetUrl: string) => {
+            loader.load(targetUrl, (tex: THREE.Texture) => {
+              if (!active) {
+                tex.dispose();
+                done();
+                return;
+              }
+              tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+              tex.wrapS = THREE.RepeatWrapping;
+              tex.wrapT = THREE.RepeatWrapping;
+              const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+              tex.flipY = shouldFlipY;
+              tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
+              tex.needsUpdate = true;
+              textureCacheRef.current[u] = tex;
+              setTextureCache(prev => {
+                if (!active) return prev;
+                return { ...prev, [u]: tex };
+              });
               done();
-              return;
-            }
-            tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-            tex.wrapS = THREE.RepeatWrapping;
-            tex.wrapT = THREE.RepeatWrapping;
-            const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
-            tex.flipY = shouldFlipY;
-            tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
-            tex.needsUpdate = true;
-            textureCacheRef.current[u] = tex;
-            setTextureCache(prev => {
-              if (!active) return prev;
-              return { ...prev, [u]: tex };
+            }, undefined, (err: any) => {
+              if (triedDirect) {
+                console.warn(`[FBXModel] Direct R2 load failed for ${u}. Retrying via proxy: ${loadUrl}`);
+                triedDirect = false;
+                executeLoad(loadUrl);
+              } else {
+                console.error(`[FBXModel] ❌ Failed to load TGA/DDS file: "${loadUrl}"`, err);
+                done();
+              }
             });
-            done();
-          }, undefined, (err: any) => {
-            console.error(`[FBXModel] ❌ Failed to load through proxy: "${loadUrl}" (original: "${u}")`, err);
-            done();
-          });
+          };
+
+          executeLoad(currentLoadUrl);
         } else {
-          // Optimized standard image loader with smart Canvas downscaling to prevent GPU Out Of Memory and WebGL context loss
+          // Optimized standard image loader with smart Canvas downscaling and fast self-healing direct-R2/proxy-fallback logic
           const img = new Image();
           img.crossOrigin = 'anonymous';
           img.referrerPolicy = 'no-referrer';
+          img.decoding = 'async'; // Request async out-of-thread decoding so the browser main thread remains butter smooth
+          
+          let triedDirect = false;
           img.src = loadUrl;
+
           img.onload = () => {
             if (!active) {
               done();
               return;
             }
             try {
-              // Cap max size according to settings or fallback to 4096 for gorgeous resolution (1024 was previously causing blurry decals)
+              // Cap max size according to settings or fallback to 4096 for gorgeous resolution
               const maxDim = settings.maxTextureSize !== undefined ? settings.maxTextureSize : 4096;
               let w = img.width;
               let h = img.height;
@@ -786,12 +920,12 @@ const FBXModel: React.FC<FBXModelProps> = ({
                 canvas.height = h;
                 const ctx = canvas.getContext('2d');
                 if (ctx) {
-                  // Use higher quality image smoothing on canvas scale down to prevent pixelation artifacts
+                  // Use higher quality image smoothing on canvas scale down
                   ctx.imageSmoothingEnabled = true;
                   ctx.imageSmoothingQuality = 'high';
                   ctx.drawImage(img, 0, 0, w, h);
                   finalSource = canvas;
-                  console.log(`[TextureOptimizer] Downscaled ${loadUrl} from ${img.width}x${img.height} to ${w}x${h} (Cap: ${maxDim})`);
+                  console.log(`[TextureOptimizer] Downscaled ${img.src} from ${img.width}x${img.height} to ${w}x${h} (Cap: ${maxDim})`);
                 }
               }
 
@@ -821,7 +955,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
               }
               // Fallback load
               const fallbackLoader = new THREE.TextureLoader();
-              fallbackLoader.load(loadUrl, (tex) => {
+              fallbackLoader.load(img.src, (tex) => {
                 if (!active) {
                   tex.dispose();
                   done();
@@ -841,50 +975,68 @@ const FBXModel: React.FC<FBXModelProps> = ({
                 });
                 done();
               }, undefined, (err) => {
-                console.error(`[FBXModel] ❌ Fallback failed: "${loadUrl}" (original: "${u}")`, err);
+                console.error(`[FBXModel] ❌ Fallback failed: "${img.src}"`, err);
                 done();
               });
             }
           };
+
           img.onerror = (err) => {
-            console.error(`[TextureOptimizer] Image load error for ${loadUrl} (original: "${u}"). Trying legacy loader as fallback:`, err);
-            if (!active) {
-              done();
-              return;
-            }
-            const fallbackLoader = new THREE.TextureLoader();
-            fallbackLoader.load(loadUrl, (tex) => {
+            if (triedDirect) {
+              console.warn(`[TextureOptimizer] Direct R2 load failed (CORS or network error) for "${u}". Falling back to proxy: "${loadUrl}"`);
+              triedDirect = false;
+              img.src = loadUrl;
+            } else {
+              console.error(`[TextureOptimizer] Image load error for ${loadUrl} (original: "${u}"). Trying legacy loader as fallback:`, err);
               if (!active) {
-                tex.dispose();
                 done();
                 return;
               }
-              tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-              tex.wrapS = THREE.RepeatWrapping;
-              tex.wrapT = THREE.RepeatWrapping;
-              const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
-              tex.flipY = shouldFlipY;
-              tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
-              tex.needsUpdate = true;
-              textureCacheRef.current[u] = tex;
-              setTextureCache(prev => {
-                if (!active) return prev;
-                return { ...prev, [u]: tex };
+              const fallbackLoader = new THREE.TextureLoader();
+              fallbackLoader.load(loadUrl, (tex) => {
+                if (!active) {
+                  tex.dispose();
+                  done();
+                  return;
+                }
+                tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                const shouldFlipY = settings.flipY !== undefined ? settings.flipY : true;
+                tex.flipY = shouldFlipY;
+                tex.anisotropy = settings.anisotropy !== undefined ? settings.anisotropy : 16;
+                tex.needsUpdate = true;
+                textureCacheRef.current[u] = tex;
+                setTextureCache(prev => {
+                  if (!active) return prev;
+                  return { ...prev, [u]: tex };
+                });
+                done();
+              }, undefined, (fallbackErr) => {
+                console.error(`[FBXModel] ❌ Fallback failed too: "${loadUrl}" (original: "${u}")`, fallbackErr);
+                done();
               });
-              done();
-            }, undefined, (fallbackErr) => {
-              console.error(`[FBXModel] ❌ Fallback failed too: "${loadUrl}" (original: "${u}")`, fallbackErr);
-              done();
-            });
+            }
           };
         }
       });
     };
 
+    let loadedCount = 0;
     const runQueue = () => {
       if (!active || currentIndex >= toLoad.length) return;
       const nextItem = toLoad[currentIndex++];
       loadSingleTexture(nextItem).then(() => {
+        if (!active) return;
+        loadedCount++;
+        if (onTexturesProgressRef.current) {
+          const cb = onTexturesProgressRef.current;
+          const currentLoaded = loadedCount;
+          const totalCount = toLoad.length;
+          setTimeout(() => {
+            cb(currentLoaded, totalCount);
+          }, 0);
+        }
         runQueue();
       });
     };
@@ -898,7 +1050,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
     return () => {
       active = false;
     };
-  }, [textureSets, settings]);
+  }, [textureUrlsKey]);
 
   useEffect(() => { textureCacheRef.current = textureCache; }, [textureCache]);
 
@@ -1035,9 +1187,33 @@ const FBXModel: React.FC<FBXModelProps> = ({
   useEffect(() => { return () => { if (mixer) mixer.stopAllAction(); }; }, [mixer]);
 
   // ── useFrame: root lock + animation stepping + explosion ─────────────────
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     if (!fbx) return;
     fbx.position.copy(rootPos.current); fbx.rotation.copy(rootRot.current); fbx.scale.copy(rootScale.current); fbx.updateMatrixWorld(true);
+
+    // Smooth entry transition animation and breathing float
+    entryProgressRef.current = THREE.MathUtils.lerp(entryProgressRef.current, 1.0, 0.04);
+    const progress = entryProgressRef.current;
+
+    if (outerGroupRef.current) {
+      // Scale: start from 0 and scale up smoothly to scaleFactor
+      const animScale = progress * scaleFactor;
+      outerGroupRef.current.scale.set(animScale, animScale, animScale);
+
+      // Position: start from slightly lower and float up gracefully
+      // Add a subtle premium floating breathing idle motion
+      const hoverY = progress > 0.95 ? Math.sin(state.clock.getElapsedTime() * 1.5) * 0.12 : 0;
+      const startYOffset = -12 * (1 - progress);
+      outerGroupRef.current.position.set(
+        centeringOffset[0],
+        centeringOffset[1] + startYOffset + hoverY,
+        centeringOffset[2]
+      );
+      
+      // Gentle spin on entry
+      outerGroupRef.current.rotation.y = (1 - progress) * 0.45;
+    }
+
     if (mixer) {
       const isPlaying = settings.isPlayingAnimation;
       const isAnyRunning = Object.values(actions).some(a => a?.isRunning());
@@ -1047,8 +1223,8 @@ const FBXModel: React.FC<FBXModelProps> = ({
       } else if (accumulatorRef.current > 0) { mixer.update(accumulatorRef.current); accumulatorRef.current = 0; }
     }
     const target = settings.isExploded ? 1.0 : 0.0;
-    const nextFactor = THREE.MathUtils.lerp(internalExplodeFactor, target, 0.05);
-    if (Math.abs(nextFactor - internalExplodeFactor) > 0.0001) setInternalExplodeFactor(nextFactor);
+    const nextFactor = THREE.MathUtils.lerp(internalExplodeFactorRef.current, target, 0.05);
+    internalExplodeFactorRef.current = nextFactor;
     const isAnyActionRunning = mixer && Object.values(actions).some(a => a?.isRunning());
     if (nextFactor > 0.001 && !isAnyActionRunning) {
       fbx.traverse((child) => {
@@ -1371,18 +1547,32 @@ const FBXModel: React.FC<FBXModelProps> = ({
   useEffect(() => {
     setMaterialNames(names);
     setMeshNames(meshes);
-    if (onAnimationsDetectedRef.current) onAnimationsDetectedRef.current(fbx && fbx.animations && fbx.animations.length > 0);
+    if (onAnimationsDetectedRef.current) {
+      const cb = onAnimationsDetectedRef.current;
+      const hasAnim = !!(fbx && fbx.animations && fbx.animations.length > 0);
+      setTimeout(() => {
+        cb(hasAnim);
+      }, 0);
+    }
   }, [fbx, names, meshes]);
 
   useEffect(() => {
     if (onMaterialsLoadedRef.current && materialNames.length > 0) {
-      onMaterialsLoadedRef.current(materialNames);
+      const cb = onMaterialsLoadedRef.current;
+      const mats = materialNames;
+      setTimeout(() => {
+        cb(mats);
+      }, 0);
     }
   }, [materialNames]);
 
   useEffect(() => {
     if (onMeshesLoadedRef.current && meshNames.length > 0) {
-      onMeshesLoadedRef.current(meshNames);
+      const cb = onMeshesLoadedRef.current;
+      const msh = meshNames;
+      setTimeout(() => {
+        cb(msh);
+      }, 0);
     }
   }, [meshNames]);
 
@@ -1458,10 +1648,63 @@ const FBXModel: React.FC<FBXModelProps> = ({
     }
   }, [settings.targetPartId, hotspots, onPartClick, scaleFactor, centeringOffset, activePartId]);
 
+  // Extreme Memory leak prevention: Dispose materials & sub-meshes when fbx changes or unmounts
+  useEffect(() => {
+    return () => {
+      if (fbx) {
+        console.log("[FBXModel] 🧹 Unmount / Change cleanup: Disposing instanced model materials and backface passes...");
+        fbx.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            
+            // Dispose backface pass materials and meshes
+            if (mesh.userData?.backFaceMesh) {
+              const bMesh = mesh.userData.backFaceMesh as THREE.Mesh;
+              if (bMesh.material) {
+                const bMats = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
+                bMats.forEach((m) => {
+                  if (m && typeof m.dispose === "function") {
+                    try { m.dispose(); } catch (err) { console.warn("Error disposing backFace Material:", err); }
+                  }
+                });
+              }
+              try { mesh.remove(bMesh); } catch(e) {}
+            }
+            if (mesh.userData?.backFaceMat) {
+              const bMat = mesh.userData.backFaceMat;
+              if (bMat && typeof bMat.dispose === "function") {
+                try { bMat.dispose(); } catch (err) { console.warn("Error disposing backFaceMat userData:", err); }
+              }
+            }
+            
+            // Dispose normal materials assigned to the mesh
+            if (mesh.material) {
+              const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+              mats.forEach((mat) => {
+                if (mat) {
+                  // Dispose maps of the material if they exist
+                  if ((mat as any).map && typeof (mat as any).map.dispose === "function") { try { (mat as any).map.dispose(); } catch (e) {} }
+                  if ((mat as any).normalMap && typeof (mat as any).normalMap.dispose === "function") { try { (mat as any).normalMap.dispose(); } catch (e) {} }
+                  if ((mat as any).roughnessMap && typeof (mat as any).roughnessMap.dispose === "function") { try { (mat as any).roughnessMap.dispose(); } catch (e) {} }
+                  if ((mat as any).metalnessMap && typeof (mat as any).metalnessMap.dispose === "function") { try { (mat as any).metalnessMap.dispose(); } catch (e) {} }
+                  if ((mat as any).alphaMap && typeof (mat as any).alphaMap.dispose === "function") { try { (mat as any).alphaMap.dispose(); } catch (e) {} }
+                  
+                  if (typeof mat.dispose === "function") {
+                    try { mat.dispose(); } catch (err) { console.warn("Error disposing Mesh Material:", err); }
+                  }
+                }
+              });
+            }
+          }
+        });
+      }
+    };
+  }, [fbx]);
+
   if (!fbx) return null;
 
   return (
-    <group position={centeringOffset} scale={scaleFactor}>
+    <group ref={outerGroupRef}>
       <primitive key={url} object={fbx} />
       {hotspots.map((hs) => (
         <group key={hs.id} position={hs.anchorPosition}>
