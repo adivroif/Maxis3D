@@ -714,14 +714,6 @@ const App: React.FC = () => {
         console.log(`[URLParam] Auto-loading model from query param: ${match.name}`);
         handleAddFromUrl(match.url, match.name);
       }
-    } else if (models.length === 0 && catalogFiles.length > 0) {
-      // If there's no query parameter and no active model is loaded, 
-      // let's load the first catalog item by default so the user doesn't see an empty screen!
-      const defaultModel = catalogFiles[0];
-      if (defaultModel) {
-        console.log(`[URLParam] Loading first catalog item as default: ${defaultModel.name}`);
-        handleAddFromUrl(defaultModel.url, defaultModel.name);
-      }
     }
   }, [catalogFiles]);
 
