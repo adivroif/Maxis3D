@@ -1215,7 +1215,7 @@ const App: React.FC = () => {
     colorVariants: [], activeVariant: null,
     flipY: true,
     wireframe: false,
-    maxTextureSize: 4096,
+    maxTextureSize: 2048,
     anisotropy: 16
   });
 

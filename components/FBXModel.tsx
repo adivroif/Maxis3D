@@ -1660,6 +1660,9 @@ const FBXModel: React.FC<FBXModelProps> = ({
             // Dispose backface pass materials and meshes
             if (mesh.userData?.backFaceMesh) {
               const bMesh = mesh.userData.backFaceMesh as THREE.Mesh;
+              if (bMesh.geometry) {
+                try { bMesh.geometry.dispose(); } catch (err) { console.warn("Error disposing backFace geometry:", err); }
+              }
               if (bMesh.material) {
                 const bMats = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
                 bMats.forEach((m) => {
@@ -1694,6 +1697,11 @@ const FBXModel: React.FC<FBXModelProps> = ({
                   }
                 }
               });
+            }
+
+            // Dispose mesh geometry to free up GPU buffers (Crucial for mobile and memory performance)
+            if (mesh.geometry) {
+              try { mesh.geometry.dispose(); } catch (err) { console.warn("Error disposing mesh geometry:", err); }
             }
           }
         });
