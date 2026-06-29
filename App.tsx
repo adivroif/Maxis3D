@@ -2394,7 +2394,7 @@ const App: React.FC = () => {
         {selectedModel && relevantVariants.length > 1 && (
           <div 
             className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
-            style={{ bottom: isCatalogCollapsed ? '52px' : (isMobile ? '237px' : '282px') }}
+            style={{ bottom: isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px') }}
           >
             <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
               <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
@@ -2898,7 +2898,7 @@ const App: React.FC = () => {
         {activePart && (
           <div 
             className={`absolute left-6 z-50 w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 bg-white/95 backdrop-blur-2xl rounded-[2rem] shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 max-h-[70vh] flex flex-col transition-all duration-500 ease-in-out`} 
-            style={{ bottom: isCatalogCollapsed ? '44px' : (isMobile ? '229px' : '282px') }}
+            style={{ bottom: isCatalogCollapsed ? '44px' : (isMobile ? '249px' : '282px') }}
             dir={isRTL ? 'rtl' : 'ltr'}
           >
             <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0">
@@ -2957,7 +2957,7 @@ const App: React.FC = () => {
 
       {/* STATIC BOTTOM CATALOG PANEL */}
       <div 
-        className="fixed bottom-0 left-0 right-0 z-40 h-[185px] sm:h-[230px] bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-black/15 dark:border-white/15 rounded-t-[2rem] shadow-[0_-12px_40px_rgba(0,0,0,0.12)] flex flex-col transition-transform duration-500 ease-in-out"
+        className="fixed bottom-0 left-0 right-0 z-40 h-[205px] sm:h-[230px] bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-black/15 dark:border-white/15 rounded-t-[2rem] shadow-[0_-12px_40px_rgba(0,0,0,0.12)] flex flex-col transition-transform duration-500 ease-in-out"
         style={{
           transform: `translateY(${isCatalogCollapsed ? '100%' : '0px'})`
         }}
