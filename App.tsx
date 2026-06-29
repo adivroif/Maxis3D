@@ -291,6 +291,64 @@ const App: React.FC = () => {
     loadExistingCache();
   }, []);
 
+  // Sync dark mode class with document.documentElement
+  useEffect(() => {
+    if (isNightMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isNightMode]);
+
+  // Keyboard orbit controls
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in any input field, textarea or editable element
+      const activeEl = document.activeElement;
+      if (
+        activeEl && 
+        (activeEl.tagName === 'INPUT' || 
+         activeEl.tagName === 'TEXTAREA' || 
+         activeEl.getAttribute('contenteditable') === 'true')
+      ) {
+        return;
+      }
+
+      let dir: 'up' | 'down' | 'left' | 'right' | null = null;
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') dir = 'up';
+      else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') dir = 'down';
+      else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') dir = 'left';
+      else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') dir = 'right';
+
+      if (dir) {
+        e.preventDefault(); // Prevent standard page scrolling when pressing arrow keys
+        setTargetView(null);
+        setActivePart(null);
+        stopSpeaking();
+        setOrbitDirection(dir);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      let dir: 'up' | 'down' | 'left' | 'right' | null = null;
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') dir = 'up';
+      else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') dir = 'down';
+      else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') dir = 'left';
+      else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') dir = 'right';
+
+      if (dir) {
+        setOrbitDirection(prev => prev === dir ? null : prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
   // 2. Queue builder when catalog files and textures are ready
   useEffect(() => {
     if (catalogFiles.length === 0) return;
@@ -309,7 +367,9 @@ const App: React.FC = () => {
       });
       
       // Related Textures
-      const matchingTextures = catalogTextures.filter(tex => isModelTextureMatch(tex.name, originalDisplayName));
+      const normalizedName = originalDisplayName.trim().toLowerCase();
+      const searchName = productTitles[normalizedName] || originalDisplayName;
+      const matchingTextures = catalogTextures.filter(tex => isModelTextureMatch(tex.name, searchName));
       matchingTextures.forEach(tex => {
         queue.push({
           url: tex.url,
@@ -323,7 +383,7 @@ const App: React.FC = () => {
     setPrefetchQueue(queue);
     setPrefetchSummary({ loaded: 0, total: queue.length });
     setCurrentPrefetchIndex(0);
-  }, [catalogFiles, catalogTextures]);
+  }, [catalogFiles, catalogTextures, productTitles]);
 
   // 3. Sequentially process next prefetch queue item - purely writing to cache storage, not generating Memory Blobs
   useEffect(() => {
@@ -453,7 +513,9 @@ const App: React.FC = () => {
 
         // Resolve textures for this specific model
         const originalDisplayName = model.name.replace(/\.fbx$/i, '');
-        const matchingTextures = catalogTextures.filter(tex => isModelTextureMatch(tex.name, originalDisplayName));
+        const normalizedName = originalDisplayName.trim().toLowerCase();
+        const searchName = productTitles[normalizedName] || originalDisplayName;
+        const matchingTextures = catalogTextures.filter(tex => isModelTextureMatch(tex.name, searchName));
 
         for (const tex of matchingTextures) {
           try {
@@ -497,7 +559,7 @@ const App: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [models, catalogTextures]);
+  }, [models, catalogTextures, productTitles]);
 
   useEffect(() => {
     // Safely subscribe to global Drei loader progress outside the React render path 
@@ -542,17 +604,23 @@ const App: React.FC = () => {
   }, [toast]);
 
   const fetchingModels = useRef(new Set<string>());
+  const fetchedModelNames = useRef<Record<string, string>>({});
 
   useEffect(() => {
     // For every model loaded, fetch dedicated texture sets from the API
     models.forEach(model => {
-      if (model.textureSets || fetchingModels.current.has(model.id)) return;
+      const normalizedModelName = model.name.replace(/\.(fbx|obj|gltf|glb)$/i, '').trim().toLowerCase();
+      const modelName = productTitles[normalizedModelName] || model.name;
+
+      if (model.textureSets && fetchedModelNames.current[model.id] === modelName) return;
+      if (fetchingModels.current.has(model.id) && fetchedModelNames.current[model.id] === modelName) return;
 
       fetchingModels.current.add(model.id);
+      fetchedModelNames.current[model.id] = modelName;
+
       const fetchTextureSets = async () => {
         try {
           const folder = 'images';
-          const modelName = model.name;
           const clientName = 'tenantA';
           const response = await fetch(`/api/files/get-images-by-model?folder=${encodeURIComponent(folder)}&modelName=${encodeURIComponent(modelName)}&clientName=${clientName}&v=3`);
           if (!response.ok) {
@@ -589,7 +657,7 @@ const App: React.FC = () => {
       
       fetchTextureSets();
     });
-  }, [models]);
+  }, [models, productTitles]);
 
   useEffect(() => {
     const fetchCatalog = async () => {
@@ -628,6 +696,48 @@ const App: React.FC = () => {
     };
     fetchCatalog();
   }, []);
+
+  // Automatically load model from URL search parameter (e.g. ?model=CHEST)
+  useEffect(() => {
+    if (catalogFiles.length === 0) return;
+    
+    const params = new URLSearchParams(window.location.search);
+    const modelParam = params.get('model');
+    
+    if (modelParam) {
+      const decodedParam = decodeURIComponent(modelParam).trim().toLowerCase();
+      const match = catalogFiles.find(f => {
+        const cleanName = f.name.replace(/\.fbx$/i, '').trim().toLowerCase();
+        return cleanName === decodedParam || f.name.toLowerCase() === decodedParam;
+      });
+      if (match) {
+        console.log(`[URLParam] Auto-loading model from query param: ${match.name}`);
+        handleAddFromUrl(match.url, match.name);
+      }
+    } else if (models.length === 0 && catalogFiles.length > 0) {
+      // If there's no query parameter and no active model is loaded, 
+      // let's load the first catalog item by default so the user doesn't see an empty screen!
+      const defaultModel = catalogFiles[0];
+      if (defaultModel) {
+        console.log(`[URLParam] Loading first catalog item as default: ${defaultModel.name}`);
+        handleAddFromUrl(defaultModel.url, defaultModel.name);
+      }
+    }
+  }, [catalogFiles]);
+
+  // Sync selected model to browser URL search params
+  useEffect(() => {
+    if (selectedModel) {
+      const params = new URLSearchParams(window.location.search);
+      const currentParam = params.get('model');
+      const modelName = selectedModel.name.replace(/\.fbx$/i, '');
+      if (currentParam !== modelName) {
+        params.set('model', modelName);
+        const newUrl = `${window.location.pathname}?${params.toString()}`;
+        window.history.replaceState({}, '', newUrl);
+      }
+    }
+  }, [selectedModel]);
 
   useEffect(() => {
     const fetchTextures = async () => {
@@ -672,11 +782,13 @@ const App: React.FC = () => {
     }
   }, [models, selectedId]);
 
+  const selectedModelTitle = selectedModel ? productTitles[selectedModel.name.trim().toLowerCase()] : undefined;
+
   useEffect(() => {
     if (selectedId && selectedModel && selectedModel.detectedMaterials.length > 0 && selectedModel.settings.colorVariants.length === 0) {
       autoMapTextures(selectedId, selectedModel.detectedMaterials);
     }
-  }, [selectedId, selectedModel?.detectedMaterials.length]);
+  }, [selectedId, selectedModel?.detectedMaterials.length, selectedModelTitle]);
 
   useEffect(() => {
     let active = true;
@@ -713,7 +825,8 @@ const App: React.FC = () => {
                     
                     // Store title for sidebar and catalog consistency
                     const normalizedName = selectedModel.name.trim().toLowerCase();
-                    setProductTitles(prev => ({ ...prev, [normalizedName]: apiTitle }));
+                    const productTitleVal = cleanEscapedQuotes(result.productTitle || result.title || result.name || selectedModel.name);
+                    setProductTitles(prev => ({ ...prev, [normalizedName]: productTitleVal }));
                     
                     if (active) {
                       const pPrice = result.productPrice !== undefined ? Number(result.productPrice) : (result.price !== undefined ? Number(result.price) : undefined);
@@ -872,6 +985,7 @@ const App: React.FC = () => {
     rect: DOMRect;
   } | null>(null);
   const [translatedParts, setTranslatedParts] = useState<Record<string, { name: string, description: string }>>({});
+  const [partDescriptions, setPartDescriptions] = useState<Record<string, string>>({});
   const [activePart, setActivePart] = useState<{ id: string, name: string, description: string, position?: THREE.Vector3, size?: THREE.Vector3, mesh?: THREE.Mesh } | null>(null);
 
   // Synchronously reset parts, translatedParts, and productDetails during render when selectedId changes
@@ -881,6 +995,7 @@ const App: React.FC = () => {
     setPrevSelectedId(selectedId);
     setModelParts([]);
     setTranslatedParts({});
+    setPartDescriptions({});
     setProductDetails(null);
     setActivePart(null);
     setIsFetchingParts(false);
@@ -1036,6 +1151,53 @@ const App: React.FC = () => {
       translateAllParts();
     }
   }, [language, modelParts]);
+
+  // Fetch and translate descriptions for matched catalog products (relatable parts)
+  useEffect(() => {
+    const visibleParts = modelParts ? modelParts.filter(part => part.presentAtSite !== false) : [];
+    if (visibleParts.length === 0 || catalogFiles.length === 0) return;
+
+    visibleParts.forEach(async (part) => {
+      const partNameForMatch = part.partName.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
+      const partKeyForMatch = (part.partKey || '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
+      const match = catalogFiles.find(file => {
+        const fileName = file.name.replace(/\.fbx$/i, '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
+        return fileName === partNameForMatch || fileName === partKeyForMatch;
+      });
+
+      if (match) {
+        const cacheKey = `${language}_${match.name.trim().toLowerCase()}`;
+        if (!partDescriptions[cacheKey]) {
+          try {
+            const res = await fetch(`/api/product-details?modelName=${encodeURIComponent(match.name.trim())}`);
+            if (res.ok) {
+              const data = await res.json();
+              const result = Array.isArray(data) ? data[0] : data;
+              if (result) {
+                let desc = cleanEscapedQuotes(result.productDescription || result.description || '');
+                if (desc) {
+                  const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
+                  if (langName !== 'English') {
+                    try {
+                      const translated = await translateBatch([desc], langName);
+                      if (translated && translated[0]) {
+                        desc = translated[0];
+                      }
+                    } catch (tErr) {
+                      console.error("Translation of fallback description failed:", tErr);
+                    }
+                  }
+                  setPartDescriptions(prev => ({ ...prev, [cacheKey]: desc }));
+                }
+              }
+            }
+          } catch (err) {
+            console.error("Failed to fetch relatable part description:", err);
+          }
+        }
+      }
+    });
+  }, [modelParts, catalogFiles, language, partDescriptions]);
 
   // Update activePart translation when language or translatedParts change
   useEffect(() => {
@@ -1286,7 +1448,8 @@ const App: React.FC = () => {
           const modelNameBase = model.name.toLowerCase().split('.')[0];
           const cleanModelName = modelNameBase.replace(/[^a-z0-9]/g, '');
           
-          let isModelMatch = isModelTextureMatch(texNameNoExt, modelNameBase);
+          const searchName = productTitles[modelNameBase] || modelNameBase;
+          let isModelMatch = isModelTextureMatch(texNameNoExt, searchName);
 
           // Prevent "Axe" matching "AxeHead" if "AxeHead" is another model
           if (isModelMatch) {
@@ -1901,7 +2064,7 @@ const App: React.FC = () => {
   const showModelLoadingScreen = !!selectedModel && !isModelFullyLoaded;
 
   return (
-    <div className={`relative w-screen h-screen overflow-hidden bg-transparent text-zinc-900 font-sans transition-colors duration-500 ${isRTL ? 'rtl' : 'ltr'}`} dir={isRTL ? 'rtl' : 'ltr'}>
+    <div className={`relative w-screen h-screen overflow-hidden bg-transparent text-zinc-900 font-sans transition-colors duration-500 ${isRTL ? 'rtl' : 'ltr'} ${isNightMode ? 'dark' : ''}`} dir={isRTL ? 'rtl' : 'ltr'}>
       {/* BACKGROUND LAYER */}
       <div className={`fixed inset-0 z-[-2] transition-colors duration-1000 ${isNightMode ? 'bg-zinc-900' : 'bg-white'}`} />
 
@@ -1922,10 +2085,38 @@ const App: React.FC = () => {
           />
         </a>
         {selectedModel && (
-          <div className="animate-in fade-in slide-in-from-left-4 duration-500 pointer-events-auto max-w-[150px] sm:max-w-[50%] text-left">
-            <div className={`text-xl sm:text-3xl font-black uppercase tracking-tight leading-tight ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
+          <div className="animate-in fade-in slide-in-from-left-4 duration-500 pointer-events-auto flex flex-col gap-1 items-start text-left">
+            <div className={`text-xs sm:text-sm font-bold uppercase tracking-wider leading-tight ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
               {translatedSelectedModelName || selectedModel.name}
             </div>
+            <button
+              onClick={() => {
+                const params = new URLSearchParams(window.location.search);
+                const modelName = selectedModel.name.replace(/\.fbx$/i, '');
+                params.set('model', modelName);
+                const shareUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+                navigator.clipboard.writeText(shareUrl)
+                  .then(() => {
+                    setToast({
+                      message: language === 'he' ? 'הקישור הועתק ללוח!' : 'Link copied to clipboard!',
+                      type: 'success'
+                    });
+                  })
+                  .catch((err) => {
+                    console.error('Failed to copy link:', err);
+                  });
+              }}
+              className={`flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg border transition-all ${
+                isNightMode 
+                  ? 'bg-zinc-800/80 hover:bg-zinc-700/85 text-zinc-300 border-white/10 hover:border-white/20' 
+                  : 'bg-zinc-100 hover:bg-zinc-200 text-zinc-600 border-black/5 hover:border-black/10'
+              }`}
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+              </svg>
+              <span>{language === 'he' ? 'שתף מודל' : 'Share Model'}</span>
+            </button>
           </div>
         )}
       </div>
@@ -2211,13 +2402,13 @@ const App: React.FC = () => {
         {selectedModel && relevantVariants.length > 1 && (
           <div 
             className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
-            style={{ bottom: isCatalogCollapsed ? '24px' : '254px' }}
+            style={{ bottom: isCatalogCollapsed ? '52px' : (isMobile ? '237px' : '282px') }}
           >
             <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
               <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
                 {activePart ? activePart.name : t.variant}
               </span>
-              <span className="text-[10px] sm:text-[12px] font-black text-zinc-800 uppercase tracking-tight truncate max-w-[60px] sm:max-w-none">
+              <span className="text-[10px] sm:text-[12px] font-black text-zinc-800 uppercase tracking-tight whitespace-normal break-words max-w-[75px] sm:max-w-none leading-tight">
                 {selectedModel.settings.activeVariant || t.default}
               </span>
             </div>
@@ -2262,7 +2453,7 @@ const App: React.FC = () => {
           <div className="fixed left-0 top-0 bottom-0 z-[110] pointer-events-none w-full">
             <button
               onClick={() => setIsProductInfoOpen(true)}
-              className={`group absolute left-4 top-[76px] sm:top-[104px] flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl border border-black/10 dark:border-white/10 shadow-2xl transition-all duration-300 pointer-events-auto rounded-xl sm:rounded-2xl ${
+              className={`group absolute left-4 top-[76px] sm:top-[104px] flex items-center justify-center w-12 h-12 sm:w-16 sm:h-16 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl border border-black/10 dark:border-white transition-all duration-300 pointer-events-auto rounded-xl sm:rounded-2xl ${
                 isProductInfoOpen ? 'opacity-0 scale-75 pointer-events-none' : 'opacity-100 scale-100'
               }`}
               style={{
@@ -2271,7 +2462,7 @@ const App: React.FC = () => {
               title={language === 'he' ? 'מידע על המוצר' : 'Product Info'}
             >
               <div className="transition-transform duration-300">
-                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-zinc-500 dark:text-zinc-400 group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                <svg className="w-5 h-5 sm:w-6 sm:h-6 text-zinc-500 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
@@ -2279,7 +2470,7 @@ const App: React.FC = () => {
 
             {/* PRODUCT INFO PANEL */}
             <div 
-              className={`absolute top-1/2 -translate-y-1/2 left-0 w-[280px] sm:w-[320px] lg:w-[380px] h-[55vh] sm:h-[80vh] backdrop-blur-3xl shadow-[25px_0_80px_rgba(0,0,0,0.15)] transition-all duration-500 transform overflow-hidden flex flex-col pointer-events-auto antialiased font-sans ${
+              className={`absolute top-1/2 -translate-y-1/2 sm:top-[calc(50%+24px)] left-0 w-[280px] sm:w-[320px] lg:w-[380px] h-[55vh] sm:h-[80vh] backdrop-blur-3xl shadow-[25px_0_80px_rgba(0,0,0,0.15)] transition-all duration-500 transform overflow-hidden flex flex-col pointer-events-auto antialiased font-sans ${
                 isProductInfoOpen ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0'
               } rounded-r-[3rem] ${
                 isNightMode 
@@ -2315,16 +2506,50 @@ const App: React.FC = () => {
                         : 'text-zinc-800 group-hover/title:text-yellow-600'
                     }`}>{productDetails?.title || translatedSelectedModelName || selectedModel.name}</h2>
                   </div>
-                  <button 
-                    onClick={() => setIsProductInfoOpen(false)}
-                    className={`w-10 h-10 flex items-center justify-center rounded-2xl transition-all ${
-                      isNightMode ? 'bg-zinc-800 hover:bg-zinc-700 text-white border border-white/20' : 'bg-zinc-100 hover:bg-zinc-200 text-zinc-400'
-                    }`}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
+                  <div className="flex gap-2">
+                    {/* Share Button */}
+                    <button
+                      onClick={() => {
+                        const params = new URLSearchParams(window.location.search);
+                        const modelName = selectedModel?.name.replace(/\.fbx$/i, '') || '';
+                        if (modelName) {
+                          params.set('model', modelName);
+                          const shareUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+                          navigator.clipboard.writeText(shareUrl)
+                            .then(() => {
+                              setToast({
+                                message: language === 'he' ? 'קישור השיתוף הועתק ללוח!' : 'Share link copied to clipboard!',
+                                type: 'success'
+                              });
+                            })
+                            .catch((err) => {
+                              console.error('Failed to copy link:', err);
+                            });
+                        }
+                      }}
+                      className={`w-10 h-10 flex items-center justify-center rounded-2xl transition-all ${
+                        isNightMode 
+                          ? 'bg-zinc-800 hover:bg-zinc-700 text-yellow-400 border border-white/20' 
+                          : 'bg-zinc-100 hover:bg-zinc-200 text-yellow-600 border border-black/5'
+                      }`}
+                      title={language === 'he' ? 'העתק קישור שיתוף' : 'Copy Share Link'}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                      </svg>
+                    </button>
+
+                    <button 
+                      onClick={() => setIsProductInfoOpen(false)}
+                      className={`w-10 h-10 flex items-center justify-center rounded-2xl transition-all ${
+                        isNightMode ? 'bg-zinc-800 hover:bg-zinc-700 text-white border border-white/20' : 'bg-zinc-100 hover:bg-zinc-200 text-zinc-400'
+                      }`}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto pr-4 no-scrollbar">
@@ -2388,209 +2613,286 @@ const App: React.FC = () => {
                     {(() => {
                       const visibleParts = modelParts ? modelParts.filter(part => part.presentAtSite !== false) : [];
                       if (!isFetchingParts && visibleParts.length === 0) return null;
+                      
                       return (
-                        <div className="space-y-4">
-                            <div className="flex items-center gap-2 mb-2">
-                              <div className={`w-1 h-3 bg-yellow-500 rounded-full ${isRTL ? 'ml-0' : ''}`}></div>
-                              <h3 className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
-                                {t.modelParts}
-                              </h3>
+                        <div className="space-y-6">
+                          {isFetchingParts ? (
+                            <div className="space-y-2">
+                              {[1, 2, 3].map(i => (
+                                <div key={i} className={`h-24 rounded-2xl animate-pulse flex flex-col p-4 gap-2 ${isNightMode ? 'bg-zinc-800/80' : 'bg-zinc-100'}`}>
+                                  <div className={`h-2 w-16 rounded ${isNightMode ? 'bg-zinc-700' : 'bg-zinc-200'}`} />
+                                  <div className={`h-4 w-32 rounded ${isNightMode ? 'bg-zinc-700' : 'bg-zinc-200'}`} />
+                                  <div className={`h-3 w-full rounded mt-auto ${isNightMode ? 'bg-zinc-700' : 'bg-zinc-200'}`} />
+                                </div>
+                              ))}
                             </div>
-                            
-                            {isFetchingParts ? (
-                          <div className="space-y-2">
-                            {[1, 2, 3].map(i => (
-                              <div key={i} className={`h-24 rounded-2xl animate-pulse flex flex-col p-4 gap-2 ${isNightMode ? 'bg-zinc-800/80' : 'bg-zinc-100'}`}>
-                                <div className={`h-2 w-16 rounded ${isNightMode ? 'bg-zinc-700' : 'bg-zinc-200'}`} />
-                                <div className={`h-4 w-32 rounded ${isNightMode ? 'bg-zinc-700' : 'bg-zinc-200'}`} />
-                                <div className={`h-3 w-full rounded mt-auto ${isNightMode ? 'bg-zinc-700' : 'bg-zinc-200'}`} />
-                              </div>
-                            ))}
-                          </div>
-                        ) : (() => {
-                          const visibleParts = modelParts ? modelParts.filter(part => part.presentAtSite !== false) : [];
-                          return (
-                            <div className="grid gap-2">
-                              {visibleParts.map((part) => {
-                                const tr = translatedParts[part.id];
-                                const name = tr?.name || part.partName;
-                                const description = tr?.description || part.description;
-                                const isActive = activePart?.id === part.id;
-                                
-                                // HIGHLIGHTING: Use partName or partKey for mesh matching 
-                                const meshMatchTarget = part.partName || part.partKey || part.id;
-                                const isHovered = hoveredPartId === meshMatchTarget;
-                                
-                                // Filter catalogTextures to only those belonging to the currently selected model to prevent across-model mixups
-                                const selectedModelName = selectedModel?.name || '';
-                                const modelSpecificTextures = catalogTextures.filter(t => isModelTextureMatch(t.name, selectedModelName));
-                                
-                                // Find the matching model file
-                                const partNameForMatch = part.partName.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
-                                const partKeyForMatch = (part.partKey || '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
-                                const match = catalogFiles.find(file => {
-                                  const fileName = file.name.replace(/\.fbx$/i, '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
-                                  return fileName === partNameForMatch || fileName === partKeyForMatch;
+                          ) : (() => {
+                            const processedParts = visibleParts.map((part) => {
+                              const tr = translatedParts[part.id];
+                              const name = tr?.name || part.partName;
+                              const isActive = activePart?.id === part.id;
+                              
+                              const meshMatchTarget = part.partName || part.partKey || part.id;
+                              const isHovered = hoveredPartId === meshMatchTarget;
+                              
+                              const selectedModelName = selectedModel?.name || '';
+                              const normalizedSelectedName = selectedModelName.replace(/\.(fbx|obj|gltf|glb)$/i, '').trim().toLowerCase();
+                              const searchName = productTitles[normalizedSelectedName] || selectedModelName;
+                              const modelSpecificTextures = catalogTextures.filter(t => isModelTextureMatch(t.name, searchName));
+                              
+                              const partNameForMatch = part.partName.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
+                              const partKeyForMatch = (part.partKey || '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
+                              const match = catalogFiles.find(file => {
+                                const fileName = file.name.replace(/\.fbx$/i, '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
+                                return fileName === partNameForMatch || fileName === partKeyForMatch;
+                              });
+
+                              const matchKey = match ? `${language}_${match.name.trim().toLowerCase()}` : '';
+                              const description = tr?.description || part.description || (matchKey ? partDescriptions[matchKey] : '');
+
+                              let partThumbnailUrl = '';
+                              if (match) {
+                                const modelBaseName = match.name.replace(/\.fbx$/i, '');
+                                const normalizedMatchName = modelBaseName.trim().toLowerCase();
+                                const matchSearchName = productTitles[normalizedMatchName] || modelBaseName;
+                                const matchedTex = catalogTextures.find(t => {
+                                  return isModelTextureMatch(t.name, matchSearchName) && t.name.toLowerCase().includes('preview');
+                                }) || catalogTextures.find(t => isModelTextureMatch(t.name, matchSearchName));
+                                if (matchedTex) {
+                                  partThumbnailUrl = matchedTex.url;
+                                }
+                              }
+                              
+                              if (!partThumbnailUrl) {
+                                const pName = part.partName.toLowerCase();
+                                const pKey = (part.partKey || '').toLowerCase();
+                                const directTex = catalogTextures.find(t => {
+                                  const lowTex = t.name.toLowerCase();
+                                  return (lowTex.startsWith(pName) || lowTex.startsWith(pKey)) && lowTex.includes('preview');
+                                }) || catalogTextures.find(t => {
+                                  const lowTex = t.name.toLowerCase();
+                                  return lowTex.startsWith(pName) || lowTex.startsWith(pKey);
                                 });
-
-                                // Prioritize textures matching the matched catalog file name
-                                let partThumbnailUrl = '';
-                                if (match) {
-                                  const modelBaseName = match.name.replace(/\.fbx$/i, '').toLowerCase();
-
-                                  const matchedTex = modelSpecificTextures.find(t => {
-                                    const lowTex = t.name.toLowerCase();
-                                    return lowTex.startsWith(modelBaseName) && lowTex.includes('preview');
-                                  }) || modelSpecificTextures.find(t => t.name.toLowerCase().startsWith(modelBaseName));
-                                  if (matchedTex) {
-                                    partThumbnailUrl = matchedTex.url;
-                                  }
+                                if (directTex) {
+                                  partThumbnailUrl = directTex.url;
                                 }
-                                
-                                // If not found via match, find directly using partName or partKey
-                                if (!partThumbnailUrl) {
-                                  const pName = part.partName.toLowerCase();
-                                  const pKey = (part.partKey || '').toLowerCase();
-                                  const directTex = modelSpecificTextures.find(t => {
-                                    const lowTex = t.name.toLowerCase();
-                                    return (lowTex.startsWith(pName) || lowTex.startsWith(pKey)) && lowTex.includes('preview');
-                                  }) || modelSpecificTextures.find(t => {
-                                    const lowTex = t.name.toLowerCase();
-                                    return lowTex.startsWith(pName) || lowTex.startsWith(pKey);
-                                  });
-                                  if (directTex) {
-                                    partThumbnailUrl = directTex.url;
-                                  }
-                                }
+                              }
 
-                                return (
-                                  <button
-                                    key={part.id}
-                                    onMouseEnter={(e) => {
-                                      setHoveredPartId(meshMatchTarget);
-                                      if (isMobile) return;
-                                      const rect = e.currentTarget.getBoundingClientRect();
-                                      setHoveredPartTooltip({
-                                        name: name,
-                                        description: description || '',
-                                        image: partThumbnailUrl || null,
-                                        rect
-                                      });
-                                    }}
-                                    onMouseLeave={() => {
-                                      setHoveredPartId(null);
-                                      setHoveredPartTooltip(null);
-                                    }}
-                                    onClick={() => {
-                                      if (activePart?.id === part.id) {
-                                        handlePartClick(null);
-                                        return;
-                                      }
-                                      
-                                      if (selectedId) {
-                                        updateModelSettings(selectedId, { targetPartId: part.id });
-                                      } else {
-                                        const p = {
-                                          id: part.id,
-                                          name: translatedParts[part.id]?.name || part.partName,
-                                          description: translatedParts[part.id]?.description || part.description,
-                                          position: new THREE.Vector3(),
-                                          size: new THREE.Vector3(),
-                                          mesh: undefined as any
-                                        };
-                                        handlePartClick(p);
-                                      }
-                                      
-                                      if (match) {
-                                        handleAddFromUrl(match.url, match.name);
-                                      }
-                                    }}
-                                    className={`flex flex-col sm:flex-row items-stretch p-4 rounded-2xl border transition-all text-start relative group cursor-pointer h-full gap-4 ${
-                                      isActive 
-                                        ? 'bg-yellow-50 border-yellow-500 border-2 shadow-lg shadow-yellow-900/10 text-yellow-950' 
-                                        : isHovered
-                                          ? isNightMode ? 'bg-yellow-900/30 border-yellow-500/50 text-white shadow-sm transform scale-[1.01]' : 'bg-yellow-50 border-yellow-300 text-yellow-900 shadow-sm transform scale-[1.01]'
-                                          : isNightMode ? 'bg-zinc-800/80 border-white/20 text-zinc-400 hover:border-white/40' : 'bg-white border-black/5 text-zinc-600 hover:border-yellow-500/30'
-                                    }`}
-                                  >
-                                    {/* Preview Image with Border Frame */}
-                                    <div className="shrink-0 self-start sm:self-center">
-                                      <div className={`w-14 h-14 sm:w-16 sm:h-16 rounded-xl relative overflow-hidden border transition-colors duration-300 ${
-                                        isActive 
-                                          ? 'border-yellow-400 bg-white' 
-                                          : isNightMode 
-                                            ? 'border-white/10 bg-zinc-900' 
-                                            : 'border-black/5 bg-zinc-50'
-                                      } shadow-sm flex items-center justify-center`}>
-                                        {partThumbnailUrl ? (
-                                          <img 
-                                            src={partThumbnailUrl} 
-                                            alt={name}
-                                            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                                            referrerPolicy="no-referrer"
-                                          />
-                                        ) : (
-                                          <div className={`w-full h-full flex items-center justify-center ${isActive ? 'text-yellow-600' : 'text-zinc-400'}`}>
-                                            {/* Cuboid icon representing component part */}
-                                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                                            </svg>
-                                          </div>
-                                        )}
-                                      </div>
+                              return {
+                                part,
+                                name,
+                                description,
+                                isActive,
+                                meshMatchTarget,
+                                isHovered,
+                                match,
+                                partThumbnailUrl
+                              };
+                            });
+
+                            const relatableParts = processedParts.filter(p => !!p.match);
+                            const pointsOfInterestParts = processedParts.filter(p => !p.match);
+
+                            return (
+                              <div className="space-y-6">
+                                {/* Relatable / Related Products Section */}
+                                {relatableParts.length > 0 && (
+                                  <div className="space-y-3">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <div className={`w-1 h-3 bg-yellow-500 rounded-full ${isRTL ? 'ml-0' : ''}`}></div>
+                                      <h3 className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
+                                        {t.modelParts}
+                                      </h3>
                                     </div>
-
-                                    {/* Details layout */}
-                                    <div className="flex-1 space-y-2 min-w-0">
-                                      <div className="flex items-start justify-between gap-2 min-w-0 w-full">
-                                        <div className="flex items-start gap-2 min-w-0 flex-1">
-                                          <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                                            {t.labelPartKey}:
-                                          </span>
-                                          <span className={`text-[10px] font-black uppercase tracking-tight break-all ${isActive ? 'text-yellow-900' : isNightMode ? 'text-zinc-300' : 'text-zinc-700'}`}>
-                                            {part.partKey || part.id.substring(0, 8)}
-                                          </span>
-                                        </div>
-                                        {match && (
-                                          <div className={`p-1.5 rounded-full ${isActive ? 'bg-yellow-500/20' : 'bg-yellow-500/10'} group-hover:scale-110 transition-transform ${isRTL ? 'rotate-180' : ''} shrink-0`}>
-                                            <svg className={`w-3.5 h-3.5 ${isActive ? 'text-yellow-600' : 'text-yellow-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                                            </svg>
+                                    <div className="grid gap-2">
+                                      {relatableParts.map(({ part, name, description, isActive, meshMatchTarget, isHovered, match, partThumbnailUrl }) => (
+                                        <button
+                                          key={part.id}
+                                          onMouseEnter={(e) => {
+                                            setHoveredPartId(meshMatchTarget);
+                                            if (isMobile) return;
+                                            const rect = e.currentTarget.getBoundingClientRect();
+                                            setHoveredPartTooltip({
+                                              name: name,
+                                              description: description || '',
+                                              image: partThumbnailUrl || null,
+                                              rect
+                                            });
+                                          }}
+                                          onMouseLeave={() => {
+                                            setHoveredPartId(null);
+                                            setHoveredPartTooltip(null);
+                                          }}
+                                          onClick={() => {
+                                            if (activePart?.id === part.id) {
+                                              handlePartClick(null);
+                                              return;
+                                            }
+                                            
+                                            if (selectedId) {
+                                              updateModelSettings(selectedId, { targetPartId: part.id });
+                                            } else {
+                                              const p = {
+                                                id: part.id,
+                                                name: translatedParts[part.id]?.name || part.partName,
+                                                description: translatedParts[part.id]?.description || part.description,
+                                                position: new THREE.Vector3(),
+                                                size: new THREE.Vector3(),
+                                                mesh: undefined as any
+                                              };
+                                              handlePartClick(p);
+                                            }
+                                            
+                                            if (match) {
+                                              handleAddFromUrl(match.url, match.name);
+                                            }
+                                          }}
+                                          className={`flex flex-col sm:flex-row items-stretch p-4 rounded-2xl border transition-all text-start relative group cursor-pointer h-full gap-4 ${
+                                            isActive 
+                                              ? 'bg-yellow-50 border-yellow-500 border-2 shadow-lg shadow-yellow-900/10 text-yellow-950' 
+                                              : isHovered
+                                                ? isNightMode ? 'bg-yellow-900/30 border-yellow-500/50 text-white shadow-sm transform scale-[1.01]' : 'bg-yellow-50 border-yellow-300 text-yellow-900 shadow-sm transform scale-[1.01]'
+                                                : isNightMode ? 'bg-zinc-800/80 border-white/20 text-zinc-400 hover:border-white/40' : 'bg-white border-black/5 text-zinc-600 hover:border-yellow-500/30'
+                                          }`}
+                                        >
+                                          {/* Preview Image with Border Frame */}
+                                          <div className="shrink-0 self-start sm:self-center">
+                                            <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-2xl relative overflow-hidden border transition-colors duration-300 bg-white dark:bg-zinc-950 ${
+                                              isActive 
+                                                ? 'border-yellow-400 bg-white' 
+                                                : isNightMode 
+                                                  ? 'border-white/10 bg-zinc-900' 
+                                                  : 'border-black/5 bg-zinc-50'
+                                            } shadow-sm flex items-center justify-center`}>
+                                              {partThumbnailUrl ? (
+                                                <img 
+                                                  src={partThumbnailUrl} 
+                                                  alt={name}
+                                                  className="w-full h-full object-contain p-1 transition-transform duration-500 group-hover:scale-110"
+                                                  referrerPolicy="no-referrer"
+                                                />
+                                              ) : (
+                                                <div className={`w-full h-full flex items-center justify-center ${isActive ? 'text-yellow-600' : 'text-zinc-400'}`}>
+                                                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                                                  </svg>
+                                                </div>
+                                              )}
+                                            </div>
                                           </div>
-                                        )}
-                                      </div>
-                                      
-                                      <div className="flex items-start gap-2 min-w-0 w-full">
-                                        <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                                          {t.labelPartName}:
-                                        </span>
-                                        <span className={`text-[11px] font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-zinc-900' : isNightMode ? 'text-white' : 'text-zinc-900'} break-words whitespace-normal min-w-0 flex-1`}>
-                                          {name}
-                                        </span>
-                                      </div>
 
-                                      <div className="flex flex-col gap-0.5">
-                                        <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                                          {t.labelPartDescription}:
-                                        </span>
-                                        <div 
-                                          className={`text-[11px] leading-snug line-clamp-3 whitespace-pre-wrap ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
-                                          dangerouslySetInnerHTML={{ __html: description }}
-                                        />
-                                      </div>
+                                          {/* Details layout */}
+                                          <div className="flex-1 space-y-2 min-w-0">
+                                            <div className="flex items-start gap-2 min-w-0 w-full">
+                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                                {t.labelPartName}:
+                                              </span>
+                                              <span className={`text-[11px] font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-zinc-900' : isNightMode ? 'text-white' : 'text-zinc-900'} break-words whitespace-normal min-w-0 flex-1`}>
+                                                {name}
+                                              </span>
+                                            </div>
+
+                                            <div className="flex flex-col gap-0.5">
+                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                                {t.labelPartDescription}:
+                                              </span>
+                                              <div 
+                                                className={`text-[11px] leading-snug line-clamp-3 whitespace-pre-wrap ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
+                                                dangerouslySetInnerHTML={{ __html: description }}
+                                              />
+                                            </div>
+                                          </div>
+                                          
+                                          {isActive && (
+                                            <div className="absolute top-4 right-4 w-1.5 h-1.5 bg-yellow-600 rounded-full animate-pulse" />
+                                          )}
+                                        </button>
+                                      ))}
                                     </div>
-                                    
-                                    {isActive && (
-                                      <div className="absolute top-4 right-4 w-1.5 h-1.5 bg-yellow-600 rounded-full animate-pulse" />
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                      </div>
+                                  </div>
+                                )}
+
+                                {/* Points of Interest Section */}
+                                {pointsOfInterestParts.length > 0 && (
+                                  <div className="space-y-3">
+                                    <div className="flex items-center gap-2 mb-2">
+                                      <div className={`w-1 h-3 bg-yellow-500 rounded-full ${isRTL ? 'ml-0' : ''}`}></div>
+                                      <h3 className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
+                                        {t.pointsOfInterest}
+                                      </h3>
+                                    </div>
+                                    <div className="grid gap-2">
+                                      {pointsOfInterestParts.map(({ part, name, description, isActive, meshMatchTarget, isHovered }) => (
+                                        <button
+                                          key={part.id}
+                                          onMouseEnter={() => {
+                                            setHoveredPartId(meshMatchTarget);
+                                          }}
+                                          onMouseLeave={() => {
+                                            setHoveredPartId(null);
+                                          }}
+                                          onClick={() => {
+                                            if (activePart?.id === part.id) {
+                                              handlePartClick(null);
+                                              return;
+                                            }
+                                            
+                                            if (selectedId) {
+                                              updateModelSettings(selectedId, { targetPartId: part.id });
+                                            } else {
+                                              const p = {
+                                                id: part.id,
+                                                name: translatedParts[part.id]?.name || part.partName,
+                                                description: translatedParts[part.id]?.description || part.description,
+                                                position: new THREE.Vector3(),
+                                                size: new THREE.Vector3(),
+                                                mesh: undefined as any
+                                              };
+                                              handlePartClick(p);
+                                            }
+                                          }}
+                                          className={`flex flex-col p-4 rounded-2xl border transition-all text-start relative group cursor-pointer h-full gap-2 ${
+                                            isActive 
+                                              ? 'bg-yellow-50 border-yellow-500 border-2 shadow-lg shadow-yellow-900/10 text-yellow-950' 
+                                              : isHovered
+                                                ? isNightMode ? 'bg-yellow-900/30 border-yellow-500/50 text-white shadow-sm transform scale-[1.01]' : 'bg-yellow-50 border-yellow-300 text-yellow-900 shadow-sm transform scale-[1.01]'
+                                                : isNightMode ? 'bg-zinc-800/80 border-white/20 text-zinc-400 hover:border-white/40' : 'bg-white border-black/5 text-zinc-600 hover:border-yellow-500/30'
+                                          }`}
+                                        >
+                                          {/* Details layout */}
+                                          <div className="flex-1 space-y-2 min-w-0">
+                                            <div className="flex items-start gap-2 min-w-0 w-full">
+                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                                {t.labelPartName}:
+                                              </span>
+                                              <span className={`text-[11px] font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-zinc-900' : isNightMode ? 'text-white' : 'text-zinc-900'} break-words whitespace-normal min-w-0 flex-1`}>
+                                                {name}
+                                              </span>
+                                            </div>
+
+                                            <div className="flex flex-col gap-0.5">
+                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                                {t.labelPartDescription}:
+                                              </span>
+                                              <div 
+                                                className={`text-[11px] leading-snug line-clamp-3 whitespace-pre-wrap ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
+                                                dangerouslySetInnerHTML={{ __html: description }}
+                                              />
+                                            </div>
+                                          </div>
+                                          
+                                          {isActive && (
+                                            <div className="absolute top-4 right-4 w-1.5 h-1.5 bg-yellow-600 rounded-full animate-pulse" />
+                                          )}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
                       );
                     })()}
                   </div>
@@ -2604,7 +2906,7 @@ const App: React.FC = () => {
         {activePart && (
           <div 
             className={`absolute left-6 z-50 w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 bg-white/95 backdrop-blur-2xl rounded-[2rem] shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 max-h-[70vh] flex flex-col transition-all duration-500 ease-in-out`} 
-            style={{ bottom: isCatalogCollapsed ? '24px' : '254px' }}
+            style={{ bottom: isCatalogCollapsed ? '44px' : (isMobile ? '229px' : '282px') }}
             dir={isRTL ? 'rtl' : 'ltr'}
           >
             <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0">
@@ -2663,20 +2965,20 @@ const App: React.FC = () => {
 
       {/* STATIC BOTTOM CATALOG PANEL */}
       <div 
-        className="fixed bottom-0 left-0 right-0 z-40 h-[230px] bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-black/15 dark:border-white/15 rounded-t-[2rem] shadow-[0_-12px_40px_rgba(0,0,0,0.12)] flex flex-col transition-transform duration-500 ease-in-out"
+        className="fixed bottom-0 left-0 right-0 z-40 h-[185px] sm:h-[230px] bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-black/15 dark:border-white/15 rounded-t-[2rem] shadow-[0_-12px_40px_rgba(0,0,0,0.12)] flex flex-col transition-transform duration-500 ease-in-out"
         style={{
-          transform: `translateY(${isCatalogCollapsed ? '230px' : '0px'})`
+          transform: `translateY(${isCatalogCollapsed ? '100%' : '0px'})`
         }}
       >
         {/* Toggle Collapse/Expand Button */}
         <button
           onClick={() => setIsCatalogCollapsed(!isCatalogCollapsed)}
-          className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-[calc(100%-1px)] w-28 h-8 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-x border-black/15 dark:border-white/15 shadow-[0_-12px_24px_rgba(0,0,0,0.08)] flex items-center justify-center rounded-t-2xl z-50 group hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-300 pointer-events-auto cursor-pointer"
+          className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-[calc(100%-1px)] w-28 h-8 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-x border-black/15 dark:border-white shadow-[0_-12px_24px_rgba(0,0,0,0.08)] flex items-center justify-center rounded-t-2xl z-50 group hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-300 pointer-events-auto cursor-pointer"
           title={language === 'he' ? (isCatalogCollapsed ? 'פתח קטלוג' : 'סגור קטלוג') : (isCatalogCollapsed ? 'Open Catalog' : 'Close Catalog')}
         >
           <div className="flex items-center justify-center w-full h-full pb-0.5">
             <div className={`transition-transform duration-500 ease-in-out ${isCatalogCollapsed ? 'rotate-180' : ''}`}>
-              <svg className="w-5 h-5 text-zinc-400 group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
               </svg>
             </div>

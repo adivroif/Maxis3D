@@ -89,6 +89,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [inventory, setInventory] = React.useState<Record<string, number>>({});
   const [descriptions, setDescriptions] = React.useState<Record<string, string>>({});
   const [apiTitles, setApiTitles] = React.useState<Record<string, string>>({});
+  const [productTitles, setProductTitles] = React.useState<Record<string, string>>({});
   const [apiCategories, setApiCategories] = React.useState<any[]>([]);
   const [displayStatus, setDisplayStatus] = React.useState<Record<string, boolean>>({});
   const [productToCategory, setProductToCategory] = React.useState<Record<string, string>>({});
@@ -272,6 +273,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             const result = Array.isArray(data) ? data[0] : data;
             if (result) {
               const apiTitle = cleanEscapedQuotes(result.productDisplayTitle || result.productTitle || result.title || result.name || '');
+              const productTitleVal = cleanEscapedQuotes(result.productTitle || result.title || result.name || '');
               const desc = cleanEscapedQuotes(result.productDescription || result.description || '');
               
               const pId = result.productId || result.id || result.ProductId;
@@ -292,6 +294,9 @@ const Sidebar: React.FC<SidebarProps> = ({
               
               if (apiTitle) {
                 setApiTitles(prev => ({ ...prev, [normalizedName]: apiTitle }));
+              }
+              if (productTitleVal) {
+                setProductTitles(prev => ({ ...prev, [normalizedName]: productTitleVal }));
               }
               if (desc) {
                 setDescriptions(prev => ({ ...prev, [normalizedName]: desc }));
@@ -690,7 +695,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     <div className="w-full h-full flex flex-col p-2.5 sm:p-3 overflow-hidden select-none bg-white dark:bg-zinc-950" dir={isRTL ? 'rtl' : 'ltr'}>
       {/* Top row: Title, Refresh Button, and Categories scroll */}
       <div className="flex flex-row items-center justify-between gap-3 px-1 sm:px-3 mb-2 h-9 shrink-0">
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="hidden sm:flex items-center gap-1.5 shrink-0">
           <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></div>
           <h2 className={`text-[11px] sm:text-[12px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-wider'} text-zinc-800 dark:text-zinc-200`}>
             {t.productsCatalog}
@@ -792,10 +797,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                 const normalizedName = originalDisplayName.trim().toLowerCase();
                 const translation = translatedModels[normalizedName];
                 const displayName = translation?.name || apiTitles[normalizedName] || cleanFileName;
+                const searchName = productTitles[normalizedName] || originalDisplayName;
                 
                 const thumbnail = r2Textures.find(t => {
-                  return isModelTextureMatch(t.name, originalDisplayName) && t.name.toLowerCase().includes('preview');
-                }) || r2Textures.find(t => isModelTextureMatch(t.name, originalDisplayName));
+                  return isModelTextureMatch(t.name, searchName) && t.name.toLowerCase().includes('preview');
+                }) || r2Textures.find(t => isModelTextureMatch(t.name, searchName));
                 
                 const isOutOfStock = inventory[normalizedName] === 0;
                 const description = translation?.description || descriptions[normalizedName];
@@ -825,12 +831,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                       }
                       onAddFromUrl(file.url, file.name);
                     }}
-                    className={`flex flex-row gap-2.5 p-2 bg-zinc-50/70 dark:bg-zinc-900/60 border rounded-2xl transition-all group shadow-sm overflow-hidden relative items-center hover:scale-[1.02] active:scale-[0.98] w-[230px] sm:w-[250px] h-[86px] shrink-0 cursor-pointer ${
+                    className={`flex flex-row gap-2.5 p-2 bg-zinc-50/70 dark:bg-zinc-900/60 border-[1px] rounded-2xl transition-all group shadow-sm overflow-hidden relative items-center hover:scale-[1.02] active:scale-[0.98] w-[230px] sm:w-[250px] h-[86px] shrink-0 cursor-pointer ${
                       isSelected 
-                        ? 'border-yellow-500 bg-yellow-50/20 dark:bg-yellow-500/10 font-bold' 
+                        ? 'border-yellow-500 dark:border-white bg-yellow-50/20 dark:bg-white/10 font-bold' 
                         : isOutOfStock 
-                          ? 'cursor-not-allowed opacity-70 border-black/5 bg-zinc-100/50' 
-                          : 'border-black/5 dark:border-white/5 hover:bg-yellow-50/40 dark:hover:bg-yellow-500/5 hover:border-yellow-200'
+                          ? 'cursor-not-allowed opacity-70 border-black/10 dark:border-white/20 bg-zinc-100/50' 
+                          : 'border-black/10 dark:border-white/20 hover:bg-yellow-50/40 dark:hover:bg-yellow-500/5 hover:border-yellow-200'
                     }`}
                   >
                     {isOutOfStock && (
@@ -844,7 +850,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     )}
 
                     <div className="shrink-0">
-                      <div className="w-[64px] h-[64px] bg-white dark:bg-zinc-800 rounded-xl relative overflow-hidden border border-black/5 dark:border-white/5">
+                      <div className="w-[64px] h-[64px] bg-white rounded-xl relative overflow-hidden border-[1px] border-black/10 dark:border-white/20">
                         {thumbnail ? (
                           <img 
                             src={thumbnail.url} 
@@ -916,18 +922,19 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div 
           className="fixed z-[9999] pointer-events-none transition-all duration-300 animate-in fade-in zoom-in-95"
           style={{
-            top: Math.max(16, hoveredProduct.rect.top - 290),
+            top: Math.max(16, hoveredProduct.rect.top - 322),
             left: Math.max(16, Math.min(window.innerWidth - 320, hoveredProduct.rect.left + (hoveredProduct.rect.width - 300) / 2)),
             width: '300px',
+            height: '310px',
           }}
         >
-          <div className="bg-white/98 dark:bg-zinc-900/98 backdrop-blur-3xl rounded-[2rem] border border-black/10 dark:border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.2)] overflow-hidden flex flex-col p-4 gap-3">
-            <div className="aspect-[4/3] w-full bg-zinc-50 dark:bg-zinc-800 rounded-[1.5rem] overflow-hidden border border-black/5 dark:border-white/5">
+          <div className="bg-white/98 dark:bg-zinc-900/98 backdrop-blur-3xl rounded-[2rem] border border-black/10 dark:border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.2)] overflow-hidden flex flex-col p-4 justify-between h-full">
+            <div className="h-[120px] w-full bg-zinc-50 rounded-[1.5rem] overflow-hidden border border-black/5 dark:border-white/5 shrink-0 flex items-center justify-center">
               {hoveredProduct.image ? (
                 <img 
                   src={hoveredProduct.image} 
                   alt={hoveredProduct.name}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain p-2"
                   referrerPolicy="no-referrer"
                 />
               ) : (
@@ -939,8 +946,8 @@ const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
             
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-col gap-0.5">
+            <div className="flex flex-col justify-between flex-1 mt-2 min-h-0">
+              <div className="flex flex-col gap-0.5 shrink-0">
                 <div className={`flex items-center justify-between ${isRTL ? 'flex-row-reverse' : ''}`}>
                   <span className="text-[9px] font-black uppercase tracking-[0.2em] text-yellow-600 dark:text-yellow-500 leading-none">
                     {t.productInfo}
@@ -951,19 +958,23 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </span>
                   )}
                 </div>
-                <h3 className={`text-lg font-black text-zinc-900 dark:text-zinc-100 leading-tight uppercase tracking-tight ${isRTL ? 'text-end' : ''}`}>
+                <h3 className={`text-base font-black text-zinc-900 dark:text-zinc-100 leading-tight uppercase tracking-tight line-clamp-1 ${isRTL ? 'text-end' : ''}`}>
                   {hoveredProduct.name}
                 </h3>
               </div>
               
-              {hoveredProduct.description && (
+              {hoveredProduct.description ? (
                 <div 
-                  className={`text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed line-clamp-4 ${isRTL ? 'text-end' : ''}`}
+                  className={`text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed overflow-y-auto no-scrollbar max-h-[90px] ${isRTL ? 'text-end' : ''}`}
                   dangerouslySetInnerHTML={{ __html: hoveredProduct.description }}
                 />
+              ) : (
+                <div className={`text-xs text-zinc-400 dark:text-zinc-500 italic font-medium leading-relaxed ${isRTL ? 'text-end' : ''}`}>
+                  {isRTL ? 'אין תיאור זמין' : 'No description available'}
+                </div>
               )}
 
-              <div className={`flex items-center justify-between pt-2 border-t border-black/5 dark:border-white/5 mt-1 ${isRTL ? 'flex-row-reverse' : ''}`}>
+              <div className={`flex items-center justify-between pt-2 border-t border-black/5 dark:border-white/5 mt-1 shrink-0 ${isRTL ? 'flex-row-reverse' : ''}`}>
                 <div className={`flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : ''}`}>
                   <div className={`w-1.5 h-1.5 rounded-full ${(hoveredProduct.inventory || 0) > 0 ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-500'}`} />
                   <span className="text-[9px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
