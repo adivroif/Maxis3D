@@ -822,7 +822,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
     // Controlled queue execution to prevent WebGL/Browser freezing under heavy parallel decode load
     let currentIndex = 0;
-    const activeLoadsLimit = 8; // Process up to 8 textures concurrently to speed up loading and match browser network pipelines
+    const activeLoadsLimit = 6; // Process up to 8 textures concurrently to speed up loading and match browser network pipelines
 
     const loadSingleTexture = ({ url: u, isColor }: { url: string; isColor: boolean }): Promise<void> => {
       return new Promise<void>((resolve) => {
