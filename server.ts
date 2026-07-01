@@ -118,7 +118,7 @@ const azureCacheDir = path.join(process.cwd(), "local_azure_cache");
 const listsCacheDir = path.join(azureCacheDir, "lists");
 const filesCacheDir = path.join(azureCacheDir, "files");
 
-const R2_PUBLIC_BASE_URL = "https://pub-721b92b9c051433d993f7185396e4c79.r2.dev";
+const R2_PUBLIC_BASE_URL = "https://files.fbxstudio.co.il";
 
 function safeDecodeURIComponent(value: string): string {
   try {

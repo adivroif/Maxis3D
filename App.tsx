@@ -259,7 +259,7 @@ const App: React.FC = () => {
   const [activeModelBlobUrls, setActiveModelBlobUrls] = useState<Record<string, string>>({});
   const [prefetchQueue, setPrefetchQueue] = useState<PrefetchItem[]>([]);
   const [currentPrefetchIndex, setCurrentPrefetchIndex] = useState(-1);
-  const [isPrefetchPaused, setIsPrefetchPaused] = useState(false);
+  const [isPrefetchPaused, setIsPrefetchPaused] = useState(typeof window !== 'undefined' && window.innerWidth < 768);
   const [currentPrefetchProgress, setCurrentPrefetchProgress] = useState(0);
   const [prefetchSummary, setPrefetchSummary] = useState({ loaded: 0, total: 0 });
   const isPrefetchingActive = useRef(false);
@@ -268,27 +268,19 @@ const App: React.FC = () => {
   const isTargetFullyLoaded = isFbxDone && texturesTotal >= 0 && (texturesTotal === 0 || texturesLoaded >= texturesTotal);
   const isModelFullyLoaded = isTargetFullyLoaded && smoothProgress >= 99.9;
 
-  // 1. Initial Cache storage loader - queries keys without instantiating massive Object URLs in RAM
+  // 1. Initial Cache storage cleaner - clears the cache to ensure we load fresh files directly from the R2 domain
   useEffect(() => {
-    const loadExistingCache = async () => {
+    const clearExistingCache = async () => {
       try {
-        const cache = await caches.open('model-assets-cache');
-        const keys = await cache.keys();
-        const mappings: Record<string, boolean> = {};
-        
-        console.log(`[CacheLoader] Found ${keys.length} raw cache records. Storing lightweight offline index...`);
-        
-        for (const req of keys) {
-          mappings[req.url] = true;
-        }
-        
-        setCachedUrls(mappings);
+        console.log('[CacheLoader] Direct mode active. Deleting old model-assets-cache to ensure fresh network requests...');
+        await caches.delete('model-assets-cache');
+        setCachedUrls({});
       } catch (err) {
-        console.warn('[CacheLoader] Error loading initial Cache Storage keys:', err);
+        console.warn('[CacheLoader] Error clearing Cache Storage:', err);
       }
     };
     
-    loadExistingCache();
+    clearExistingCache();
   }, []);
 
   // Sync dark mode class with document.documentElement
@@ -349,217 +341,22 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // 2. Queue builder when catalog files and textures are ready
+  // 2. Queue builder when catalog files and textures are ready (DISABLED - Direct Mode to prevent mobile stutters/bandwidth drain)
   useEffect(() => {
-    if (catalogFiles.length === 0) return;
-    
-    const queue: PrefetchItem[] = [];
-    
-    catalogFiles.forEach(file => {
-      const originalDisplayName = file.name.replace(/\.fbx$/i, '');
-      
-      // FBX Model itself
-      queue.push({
-        url: file.url,
-        type: 'fbx',
-        modelName: originalDisplayName,
-        name: file.name
-      });
-      
-      // Related Textures
-      const normalizedName = originalDisplayName.trim().toLowerCase();
-      const searchName = productTitles[normalizedName] || originalDisplayName;
-      const matchingTextures = catalogTextures.filter(tex => isModelTextureMatch(tex.name, searchName));
-      matchingTextures.forEach(tex => {
-        queue.push({
-          url: tex.url,
-          type: 'texture',
-          modelName: originalDisplayName,
-          name: tex.name
-        });
-      });
-    });
-    
-    setPrefetchQueue(queue);
-    setPrefetchSummary({ loaded: 0, total: queue.length });
-    setCurrentPrefetchIndex(0);
-  }, [catalogFiles, catalogTextures, productTitles]);
+    setPrefetchQueue([]);
+    setPrefetchSummary({ loaded: 0, total: 0 });
+    setCurrentPrefetchIndex(-1);
+  }, [catalogFiles, catalogTextures]);
 
-  // 3. Sequentially process next prefetch queue item - purely writing to cache storage, not generating Memory Blobs
+  // 3. Sequentially process next prefetch queue item (DISABLED - Direct Mode to prevent mobile stutters/bandwidth drain)
   useEffect(() => {
-    let active = true;
-    
-    const processNextQueueItem = async () => {
-      if (!active) return;
-      
-      // Freeze caching entirely if an active model is busy loading (maximizing IO and CPU for interactive render)
-      const isModelLoading = catalogFiles.length > 0 && !isModelFullyLoaded;
-      
-      if (isPrefetchPaused || isModelLoading || currentPrefetchIndex < 0 || currentPrefetchIndex >= prefetchQueue.length) {
-        isPrefetchingActive.current = false;
-        return;
-      }
-      
-      if (isPrefetchingActive.current) return;
-      isPrefetchingActive.current = true;
-      
-      const item = prefetchQueue[currentPrefetchIndex];
-      
-      // Skip download if we already verified caching
-      if (cachedUrls[item.url]) {
-        setPrefetchSummary(prev => ({ ...prev, loaded: Math.min(prev.loaded + 1, prev.total) }));
-        isPrefetchingActive.current = false;
-        setCurrentPrefetchIndex(prev => prev + 1);
-        return;
-      }
-      
-      // Skip download if it's in Cache Storage but just not in cachedUrls yet
-      try {
-        const cache = await caches.open('model-assets-cache');
-        const matched = await cache.match(item.url);
-        if (matched) {
-          setCachedUrls(prev => ({ ...prev, [item.url]: true }));
-          setPrefetchSummary(prev => ({ ...prev, loaded: Math.min(prev.loaded + 1, prev.total) }));
-          isPrefetchingActive.current = false;
-          setCurrentPrefetchIndex(prev => prev + 1);
-          return;
-        }
-      } catch (e) {
-        console.warn('[Prefetch] Match error:', e);
-      }
-      
-      // Perform progressive background fetch
-      try {
-        console.log(`[Prefetch] Background fetch: ${item.name} (${currentPrefetchIndex + 1}/${prefetchQueue.length})`);
-        setCurrentPrefetchProgress(0);
-        
-        const blob = await fetchWithProgress(item.url, (loaded, total) => {
-          if (!active) return;
-          const progress = total > 0 ? Math.round((loaded / total) * 100) : 0;
-          setCurrentPrefetchProgress(progress);
-        });
-        
-        if (!active) return;
-        
-        const cache = await caches.open('model-assets-cache');
-        const responseToCache = new Response(blob, {
-          headers: {
-            'Content-Type': item.type === 'fbx' ? 'application/octet-stream' : 'image/jpeg',
-            'Content-Length': blob.size.toString()
-          }
-        });
-        await cache.put(item.url, responseToCache);
-        
-        setCachedUrls(prev => ({ ...prev, [item.url]: true }));
-        setPrefetchSummary(prev => ({ ...prev, loaded: Math.min(prev.loaded + 1, prev.total) }));
-        
-        console.log(`[Prefetch] Completed and cached locally to offline disk storage: ${item.name}`);
-      } catch (err) {
-        console.warn(`[Prefetch] Failed caching item ${item.name}:`, err);
-      } finally {
-        if (active) {
-          isPrefetchingActive.current = false;
-          setCurrentPrefetchProgress(0);
-          setCurrentPrefetchIndex(prev => prev + 1);
-        }
-      }
-    };
-    
-    // Give browser a tiny 1-sec breath before sequentially starting background queue task
-    const timer = setTimeout(() => {
-      processNextQueueItem();
-    }, 1000);
-    
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [prefetchQueue, currentPrefetchIndex, isPrefetchPaused, isModelFullyLoaded, cachedUrls, catalogFiles.length]);
+    isPrefetchingActive.current = false;
+  }, []);
 
-  // 4. Resolve Cache to Object URLs for ONLY the active models in the scene (prevents OOM / crashes)
+  // 4. Resolve Cache to Object URLs (DISABLED - Direct CDN Mode to load directly and prevent OOM/Stutters)
   useEffect(() => {
-    let active = true;
-    const oldActiveBlobUrls = { ...activeModelBlobUrls };
-
-    const resolveActiveModels = async () => {
-      if (models.length === 0) {
-        if (active) setActiveModelBlobUrls({});
-        // Revoke all prior active object URLs
-        Object.values(oldActiveBlobUrls).forEach(url => {
-          try { URL.revokeObjectURL(url); } catch (e) { console.warn('Error revoking URL:', e); }
-        });
-        return;
-      }
-
-      const cache = await caches.open('model-assets-cache');
-      const newBlobUrls: Record<string, string> = {};
-
-      for (const model of models) {
-        // Resolve FBX model structure
-        try {
-          if (oldActiveBlobUrls[model.url]) {
-            newBlobUrls[model.url] = oldActiveBlobUrls[model.url];
-          } else {
-            const matched = await cache.match(model.url);
-            if (matched) {
-              const blob = await matched.blob();
-              newBlobUrls[model.url] = URL.createObjectURL(blob);
-              console.log(`[CacheResolver] Resolved active scene model FBX to memory: ${model.name}`);
-            }
-          }
-        } catch (e) {
-          console.warn('[CacheResolver] Match error or file not yet cached for FBX:', model.url, e);
-        }
-
-        // Resolve textures for this specific model
-        const originalDisplayName = model.name.replace(/\.fbx$/i, '');
-        const normalizedName = originalDisplayName.trim().toLowerCase();
-        const searchName = productTitles[normalizedName] || originalDisplayName;
-        const matchingTextures = catalogTextures.filter(tex => isModelTextureMatch(tex.name, searchName));
-
-        for (const tex of matchingTextures) {
-          try {
-            if (oldActiveBlobUrls[tex.url]) {
-              newBlobUrls[tex.url] = oldActiveBlobUrls[tex.url];
-            } else {
-              const matched = await cache.match(tex.url);
-              if (matched) {
-                const blob = await matched.blob();
-                newBlobUrls[tex.url] = URL.createObjectURL(blob);
-              }
-            }
-          } catch (e) {
-            console.warn('[CacheResolver] Match error or texture not yet cached:', tex.url, e);
-          }
-        }
-      }
-
-      if (!active) {
-        // Clean up any newly instantiated Object URLs if component was aborted
-        Object.keys(newBlobUrls).forEach(url => {
-          if (!oldActiveBlobUrls[url]) {
-            try { URL.revokeObjectURL(newBlobUrls[url]); } catch (e) { console.warn('Error revoking URL:', e); }
-          }
-        });
-        return;
-      }
-
-      // Identify and revoke obsoleted active blob URLs to completely free up memory immediately
-      Object.keys(oldActiveBlobUrls).forEach(url => {
-        if (!newBlobUrls[url]) {
-          try { URL.revokeObjectURL(oldActiveBlobUrls[url]); } catch (e) { console.warn('Error revoking URL:', e); }
-        }
-      });
-
-      setActiveModelBlobUrls(newBlobUrls);
-    };
-
-    resolveActiveModels();
-
-    return () => {
-      active = false;
-    };
-  }, [models, catalogTextures, productTitles]);
+    setActiveModelBlobUrls({});
+  }, [models, catalogTextures]);
 
   useEffect(() => {
     // Safely subscribe to global Drei loader progress outside the React render path 
@@ -680,9 +477,9 @@ const App: React.FC = () => {
               const name = item.fileName || item.FileName || item.filename || item.Name || item.name || "";
               const key = item.fullPath || item.FullPath || item.fullpath || item.Key || item.item_key || item.key || name || "";
               const itemUrl = item.url || item.Url || "";
-              const url = (itemUrl && itemUrl.includes("pub-")) 
+              const url = (itemUrl && itemUrl.includes("files.fbxstudio.co.il")) 
                 ? itemUrl 
-                : `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/tenants/tenantA/${encodeURIComponent(name)}`;
+                : `https://files.fbxstudio.co.il/tenants/tenantA/${encodeURIComponent(name)}`;
               return { key, name, url };
             })
             .filter((f: any) => f.name.toLowerCase().endsWith(".fbx") || f.key.toLowerCase().endsWith(".fbx"));
@@ -751,9 +548,9 @@ const App: React.FC = () => {
             const key = item.fullPath || item.FullPath || item.fullpath || item.Key || item.item_key || item.key || item.FilePath || name || "";
             // Textures/images are loaded directly from R2 public bucket path
             const itemUrl = item.url || item.Url || "";
-            const url = (itemUrl && itemUrl.includes("pub-"))
+            const url = (itemUrl && itemUrl.includes("files.fbxstudio.co.il"))
               ? itemUrl
-              : `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(name)}`;
+              : `https://files.fbxstudio.co.il/images/${encodeURIComponent(name)}`;
             return { key, name, url };
           }).filter((f: any) => {
             const lowName = f.name.toLowerCase();
@@ -2070,7 +1867,7 @@ const App: React.FC = () => {
           className="w-12 h-12 sm:w-16 sm:h-16 bg-white/80 backdrop-blur-xl rounded-xl sm:rounded-2xl border border-black/5 shadow-2xl overflow-hidden flex items-center justify-center pointer-events-auto transition-transform hover:scale-105 active:scale-95"
         >
           <img 
-            src="https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/wallpaper_customer_maxis_only_logo.png" 
+            src="https://files.fbxstudio.co.il/images/wallpaper_customer_maxis_only_logo.png" 
             alt="Customer Logo" 
             className="w-full h-full object-contain p-2"
             referrerPolicy="no-referrer"

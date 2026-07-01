@@ -384,7 +384,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         let url = item.url || item.Url || "";
         if (!url) {
           if (sourceFolder === "images" || sourceFolder.toLowerCase().includes("image")) {
-            url = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/images/${encodeURIComponent(name)}`;
+            url = `https://files.fbxstudio.co.il/images/${encodeURIComponent(name)}`;
           } else {
             // Build the appropriate direct R2 public URL
             let r2Path = "";
@@ -397,11 +397,11 @@ const Sidebar: React.FC<SidebarProps> = ({
             } else {
               r2Path = `${sourceFolder}/${name}`;
             }
-            url = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/${r2Path.split("/").map(encodeURIComponent).join("/")}`;
+            url = `https://files.fbxstudio.co.il/${r2Path.split("/").map(encodeURIComponent).join("/")}`;
           }
         } else {
           // If the url exists but is not on the R2 public host, rewrite it to R2 public host
-          if (!url.includes("pub-")) {
+          if (!url.includes("files.fbxstudio.co.il")) {
             let r2Path = "";
             if (sourceFolder === "images" || sourceFolder.toLowerCase().includes("image")) {
               r2Path = `images/${name}`;
@@ -414,7 +414,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             } else {
               r2Path = `${sourceFolder}/${name}`;
             }
-            url = `https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/${r2Path.split("/").map(encodeURIComponent).join("/")}`;
+            url = `https://files.fbxstudio.co.il/${r2Path.split("/").map(encodeURIComponent).join("/")}`;
           }
         }
         return { key, name, url };

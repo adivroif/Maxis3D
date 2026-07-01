@@ -9,7 +9,7 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import '../types';
 import { MaterialSettings, ModelPart, TextureSet } from '../types';
 
-const R2_PUBLIC_BASE_URL = 'https://pub-721b92b9c051433d993f7185396e4c79.r2.dev/';
+const R2_PUBLIC_BASE_URL = 'https://files.fbxstudio.co.il/';
 const R2_PROXY_BASE_URL = '';
 
 function safeDecodeRepeated(value: string): string {
