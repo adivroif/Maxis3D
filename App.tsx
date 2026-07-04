@@ -2206,7 +2206,7 @@ const App: React.FC = () => {
         {selectedModel && relevantVariants.length > 1 && (
           <div 
             className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
-            style={{ bottom: isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px') }}
+            style={{ bottom: isIPad ? '84px' : (isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px')) }}
           >
             <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
               <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
@@ -2710,7 +2710,7 @@ const App: React.FC = () => {
         {activePart && (
           <div 
             className={`absolute left-6 z-50 w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 bg-white/95 backdrop-blur-2xl rounded-[2rem] shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 max-h-[70vh] flex flex-col transition-all duration-500 ease-in-out`} 
-            style={{ bottom: isCatalogCollapsed ? '44px' : (isMobile ? '249px' : '282px') }}
+            style={{ bottom: isIPad ? '80px' : (isCatalogCollapsed ? '44px' : (isMobile ? '249px' : '282px')) }}
             dir={isRTL ? 'rtl' : 'ltr'}
           >
             <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0">
@@ -2745,25 +2745,49 @@ const App: React.FC = () => {
         )}
       </div>
 
-      {/* STATIC BOTTOM CATALOG PANEL */}
+      {/* STATIC BOTTOM/RIGHT CATALOG PANEL */}
       <div 
-        className="fixed bottom-0 left-0 right-0 z-40 h-[205px] sm:h-[230px] bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-black/15 dark:border-white/15 rounded-t-[2rem] shadow-[0_-12px_40px_rgba(0,0,0,0.12)] flex flex-col transition-transform duration-500 ease-in-out"
+        className={`fixed z-40 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl flex flex-col transition-all duration-500 ease-in-out ${
+          isIPad 
+            ? 'top-0 bottom-0 right-0 w-[300px] h-full rounded-l-[2rem] border-l border-black/15 dark:border-white/15 shadow-[-12px_0_40px_rgba(0,0,0,0.12)] pb-4' 
+            : 'bottom-0 left-0 right-0 h-[205px] sm:h-[230px] rounded-t-[2rem] border-t border-black/15 dark:border-white/15 shadow-[0_-12px_40px_rgba(0,0,0,0.12)]'
+        }`}
         style={{
-          transform: `translateY(${isCatalogCollapsed ? '100%' : '0px'})`
+          transform: isIPad 
+            ? `translateX(${isCatalogCollapsed ? '100%' : '0px'})` 
+            : `translateY(${isCatalogCollapsed ? '100%' : '0px'})`
         }}
       >
         {/* Toggle Collapse/Expand Button */}
         <button
           onClick={() => setIsCatalogCollapsed(!isCatalogCollapsed)}
-          className={`absolute top-0 ${isIPad ? 'right-6 sm:right-8 md:right-12' : 'left-1/2 -translate-x-1/2'} -translate-y-[calc(100%-1px)] w-28 h-8 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-x border-black/15 dark:border-white shadow-[0_-12px_24px_rgba(0,0,0,0.08)] flex items-center justify-center rounded-t-2xl z-50 group hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-300 pointer-events-auto cursor-pointer`}
+          className={`absolute bg-white/95 dark:bg-zinc-950/95 backdrop-blur-2xl border border-black/15 dark:border-white/15 shadow-md flex items-center justify-center z-50 group hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-300 pointer-events-auto cursor-pointer ${
+            isIPad 
+              ? 'left-0 top-1/2 -translate-y-1/2 -translate-x-[calc(100%-1px)] w-8 h-24 rounded-l-2xl border-r-0' 
+              : 'top-0 left-1/2 -translate-x-1/2 -translate-y-[calc(100%-1px)] w-28 h-8 rounded-t-2xl border-b-0'
+          }`}
           title={language === 'he' ? (isCatalogCollapsed ? 'פתח קטלוג' : 'סגור קטלוג') : (isCatalogCollapsed ? 'Open Catalog' : 'Close Catalog')}
         >
-          <div className="flex items-center justify-center w-full h-full pb-0.5">
-            <div className={`transition-transform duration-500 ease-in-out ${isCatalogCollapsed ? 'rotate-180' : ''}`}>
-              <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
+          <div className="flex items-center justify-center w-full h-full">
+            {isIPad ? (
+              isCatalogCollapsed ? (
+                /* Collapsed (closed) state on iPad: arrow points left to indicate opening */
+                <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" />
+                </svg>
+              ) : (
+                /* Expanded (open) state on iPad: arrow points right to indicate closing */
+                <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
+                </svg>
+              )
+            ) : (
+              <div className={`transition-transform duration-500 ease-in-out ${isCatalogCollapsed ? 'rotate-180' : ''}`}>
+                <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+            )}
           </div>
         </button>
 
