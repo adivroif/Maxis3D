@@ -2205,8 +2205,8 @@ const App: React.FC = () => {
         {/* COLOR VARIANTS - BOTTOM CENTER */}
         {selectedModel && relevantVariants.length > 1 && (
           <div 
-            className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
-            style={{ bottom: isIPad ? (isCatalogCollapsed ? '96px' : '250px') : (isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px')) }}
+            className="absolute left-1/2 -translate-x-1/2 z-[45] flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
+            style={{ bottom: isIPad ? (isCatalogCollapsed ? '32px' : '260px') : (isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px')) }}
           >
             <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
               <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
@@ -2709,8 +2709,8 @@ const App: React.FC = () => {
         {/* BOTTOM LEFT DESCRIPTION BOX */}
         {activePart && (
           <div 
-            className={`absolute left-6 z-50 ${isIPad ? 'w-[230px] p-3.5 sm:p-4 rounded-[1.5rem]' : 'w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 rounded-[2rem]'} bg-white/95 backdrop-blur-2xl shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 ${isIPad ? 'max-h-[140px]' : 'max-h-[70vh]'} flex flex-col transition-all duration-500 ease-in-out`} 
-            style={{ bottom: isIPad ? (isCatalogCollapsed ? '96px' : '250px') : (isCatalogCollapsed ? '44px' : (isMobile ? '249px' : '282px')) }}
+            className={`absolute left-6 z-50 ${isIPad ? 'w-[190px] p-3 rounded-[1.5rem]' : 'w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 rounded-[2rem]'} bg-white/95 backdrop-blur-2xl shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 ${isIPad ? 'max-h-[105px]' : 'max-h-[70vh]'} flex flex-col transition-all duration-500 ease-in-out`} 
+            style={{ bottom: isIPad ? (isCatalogCollapsed ? '32px' : '260px') : (isCatalogCollapsed ? '44px' : (isMobile ? '249px' : '282px')) }}
             dir={isRTL ? 'rtl' : 'ltr'}
           >
             <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0">
