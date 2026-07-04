@@ -2754,41 +2754,22 @@ const App: React.FC = () => {
             : `translateY(${isCatalogCollapsed ? '100%' : '0px'})`
         }}
       >
-        {/* Toggle Collapse/Expand Button */}
-        <button
-          onClick={() => setIsCatalogCollapsed(!isCatalogCollapsed)}
-          className={`absolute bg-white/95 dark:bg-zinc-950/95 backdrop-blur-2xl border border-black/15 dark:border-white/15 shadow-md flex items-center justify-center z-50 group hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-300 pointer-events-auto cursor-pointer ${
-            isIPad 
-              ? (isCatalogCollapsed 
-                  ? 'top-4 left-0 -translate-x-[calc(100%+24px)] w-28 h-8 rounded-2xl border' 
-                  : 'top-0 right-6 sm:right-8 md:right-12 -translate-y-[calc(100%-1px)] w-28 h-8 rounded-t-2xl border-b-0'
-                )
-              : 'top-0 left-1/2 -translate-x-1/2 -translate-y-[calc(100%-1px)] w-28 h-8 rounded-t-2xl border-b-0'
-          }`}
-          title={language === 'he' ? (isCatalogCollapsed ? 'פתח קטלוג' : 'סגור קטלוג') : (isCatalogCollapsed ? 'Open Catalog' : 'Close Catalog')}
-        >
-          <div className="flex items-center justify-center w-full h-full">
-            {isIPad ? (
-              isCatalogCollapsed ? (
-                /* Collapsed (closed) state on iPad: arrow points left to indicate opening from right to left */
-                <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" />
-                </svg>
-              ) : (
-                /* Expanded (open) state on iPad: arrow points right to indicate closing towards right */
-                <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
-                </svg>
-              )
-            ) : (
+        {/* Toggle Collapse/Expand Button (Non-iPad) */}
+        {!isIPad && (
+          <button
+            onClick={() => setIsCatalogCollapsed(!isCatalogCollapsed)}
+            className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-[calc(100%-1px)] w-28 h-8 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-x border-black/15 dark:border-white shadow-[0_-12px_24px_rgba(0,0,0,0.08)] flex items-center justify-center rounded-t-2xl z-50 group hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-300 pointer-events-auto cursor-pointer"
+            title={language === 'he' ? (isCatalogCollapsed ? 'פתח קטלוג' : 'סגור קטלוג') : (isCatalogCollapsed ? 'Open Catalog' : 'Close Catalog')}
+          >
+            <div className="flex items-center justify-center w-full h-full pb-0.5">
               <div className={`transition-transform duration-500 ease-in-out ${isCatalogCollapsed ? 'rotate-180' : ''}`}>
                 <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7" />
                 </svg>
               </div>
-            )}
-          </div>
-        </button>
+            </div>
+          </button>
+        )}
 
         <Sidebar 
           models={models} 
@@ -2810,6 +2791,31 @@ const App: React.FC = () => {
           isCatalogCollapsed={isCatalogCollapsed}
         />
       </div>
+
+      {isIPad && (
+        <button
+          onClick={() => setIsCatalogCollapsed(!isCatalogCollapsed)}
+          className="fixed right-0 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-2xl border-y border-l border-r-0 border-black/15 dark:border-white/15 shadow-md flex items-center justify-center z-50 group hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-500 ease-in-out cursor-pointer w-8 h-24 rounded-l-2xl rounded-r-none"
+          style={{
+            bottom: isCatalogCollapsed ? '24px' : '230px'
+          }}
+          title={language === 'he' ? (isCatalogCollapsed ? 'פתח קטלוג' : 'סגור קטלוג') : (isCatalogCollapsed ? 'Open Catalog' : 'Close Catalog')}
+        >
+          <div className="flex items-center justify-center w-full h-full">
+            {isCatalogCollapsed ? (
+              /* Collapsed (closed) state: arrow points left to indicate opening from right to left */
+              <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" />
+              </svg>
+            ) : (
+              /* Expanded (open) state: arrow points right to indicate closing towards right */
+              <svg className="w-5 h-5 text-zinc-400 dark:text-white group-hover:text-yellow-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" />
+              </svg>
+            )}
+          </div>
+        </button>
+      )}
 
       <CameraControls 
         onAction={handleCameraAction} 
