@@ -22,6 +22,7 @@ interface SidebarProps {
   currentPrefetchFile?: string;
   onTogglePrefetchPause?: () => void;
   searchQuery?: string;
+  isCatalogCollapsed?: boolean;
 }
 
 const cleanEscapedQuotes = (str: string): string => {
@@ -78,8 +79,20 @@ const Sidebar: React.FC<SidebarProps> = ({
   isPrefetchPaused = false,
   currentPrefetchFile = '',
   onTogglePrefetchPause = () => {},
-  searchQuery = ''
+  searchQuery = '',
+  isCatalogCollapsed = false
 }) => {
+  const isIPad = typeof window !== 'undefined' && (
+    /iPad/i.test(navigator.userAgent) || 
+    (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+  );
+
+  const isTouchDevice = typeof window !== 'undefined' && (
+    window.matchMedia('(pointer: coarse)').matches || 
+    /iPad|iPhone|Android|Mobi/i.test(navigator.userAgent) ||
+    isIPad
+  );
+
   const [r2Files, setR2Files] = React.useState<any[]>([]);
   const [r2Textures, setR2Textures] = React.useState<any[]>([]);
   const [isLoadingR2, setIsLoadingR2] = React.useState(false);
@@ -785,13 +798,16 @@ const Sidebar: React.FC<SidebarProps> = ({
         ) : r2Files.length === 0 ? (
           <div className="text-[10px] text-zinc-400 font-bold text-center py-4 italic">{t.noAssetsFound}</div>
         ) : (
-          <div className="w-full h-full flex flex-row gap-3 overflow-x-auto overflow-y-hidden custom-scroll items-center pb-1 px-1.5 scrollbar-thin select-none">
+          <div 
+            key={isCatalogCollapsed ? 'collapsed' : 'expanded'}
+            className="w-full h-full flex flex-row gap-3 overflow-x-auto overflow-y-hidden custom-scroll items-center pb-1 px-1.5 scrollbar-thin select-none"
+          >
             {filteredProducts.length === 0 ? (
               <div className="text-[10px] text-zinc-400 font-bold text-center py-4 italic w-full">
                 {t.noAssetsFound}
               </div>
             ) : (
-              filteredProducts.map((file) => {
+              filteredProducts.map((file, index) => {
                 const originalDisplayName = file.name.replace(/\.fbx$/i, '');
                 const cleanFileName = originalDisplayName.replace(/_/g, ' ').replace(/-/g, ' ');
                 const normalizedName = originalDisplayName.trim().toLowerCase();
@@ -807,11 +823,17 @@ const Sidebar: React.FC<SidebarProps> = ({
                 const description = translation?.description || descriptions[normalizedName];
                 const isSelected = selectedId === file.id || selectedModel?.url === file.url;
 
+                // On iPad, animate item entrance from right to left with a staggered delay
+                const delayMs = index * 50;
+                const animClass = isIPad ? "animate-slide-in-rtl opacity-0" : "";
+                const animStyle = isIPad ? { animationDelay: `${delayMs}ms`, animationFillMode: 'forwards' } : {};
+
                 return (
                   <div 
                     key={file.key}
+                    style={animStyle}
                     onMouseEnter={(e) => {
-                      if (isMobile) return;
+                      if (isMobile || isTouchDevice) return;
                       const rect = e.currentTarget.getBoundingClientRect();
                       setHoveredProduct({
                         name: displayName,
@@ -831,7 +853,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       }
                       onAddFromUrl(file.url, file.name);
                     }}
-                    className={`flex flex-row gap-2.5 p-2 bg-zinc-50/70 dark:bg-zinc-900/60 border-[1px] rounded-2xl transition-all group shadow-sm overflow-hidden relative items-center hover:scale-[1.02] active:scale-[0.98] w-[230px] sm:w-[250px] h-[86px] shrink-0 cursor-pointer ${
+                    className={`${animClass} flex flex-row gap-2.5 p-2 bg-zinc-50/70 dark:bg-zinc-900/60 border-[1px] rounded-2xl transition-all group shadow-sm overflow-hidden relative items-center hover:scale-[1.02] active:scale-[0.98] w-[230px] sm:w-[250px] h-[86px] shrink-0 cursor-pointer ${
                       isSelected 
                         ? 'border-yellow-500 dark:border-white bg-yellow-50/20 dark:bg-white/10 font-bold' 
                         : isOutOfStock 

@@ -241,6 +241,21 @@ const App: React.FC = () => {
   const [productTitles, setProductTitles] = useState<Record<string, string>>({});
   const [translatedSelectedModelName, setTranslatedSelectedModelName] = useState<string>('');
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768);
+  const isIPad = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      /iPad/i.test(navigator.userAgent) || 
+      (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+    );
+  }, []);
+  const isTouchDevice = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.matchMedia('(pointer: coarse)').matches || 
+      /iPad|iPhone|Android|Mobi/i.test(navigator.userAgent) ||
+      isIPad
+    );
+  }, [isIPad]);
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' } | null>(null);
   const [uvLayoutSvg, setUvLayoutSvg] = useState<string>('');
   const [uvLayoutFilename, setUvLayoutFilename] = useState<string>('');
@@ -2499,7 +2514,7 @@ const App: React.FC = () => {
                                           key={part.id}
                                           onMouseEnter={(e) => {
                                             setHoveredPartId(meshMatchTarget);
-                                            if (isMobile) return;
+                                            if (isMobile || isTouchDevice) return;
                                             const rect = e.currentTarget.getBoundingClientRect();
                                             setHoveredPartTooltip({
                                               name: name,
@@ -2724,29 +2739,7 @@ const App: React.FC = () => {
                 dangerouslySetInnerHTML={{ __html: activePart.description || t.noDescription }}
               />
 
-              {activePart.mesh && (
-                <button
-                  onClick={() => {
-                    if (activePart.mesh) {
-                      const svg = generateSingleMeshUVSVG(activePart.mesh);
-                      if (svg) {
-                        const cleanMeshName = activePart.mesh.name.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
-                        setInspectedUVPart({
-                          name: activePart.name,
-                          svg: svg,
-                          filename: `${selectedModel?.name || 'model'}_part_${cleanMeshName}_uv_layout.svg`
-                        });
-                      }
-                    }
-                  }}
-                  className="mt-4 flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-600 hover:from-blue-100 hover:to-indigo-100 font-extrabold text-[11px] sm:text-xs transition-all border border-blue-100/50 hover:border-blue-200/50 shadow-sm cursor-pointer"
-                >
-                  <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  {language === 'he' ? 'הצג קואורדינטות UV לחלק זה' : 'Inspect Mesh UV Map'}
-                </button>
-              )}
+
             </div>
           </div>
         )}
@@ -2762,7 +2755,7 @@ const App: React.FC = () => {
         {/* Toggle Collapse/Expand Button */}
         <button
           onClick={() => setIsCatalogCollapsed(!isCatalogCollapsed)}
-          className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-[calc(100%-1px)] w-28 h-8 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-x border-black/15 dark:border-white shadow-[0_-12px_24px_rgba(0,0,0,0.08)] flex items-center justify-center rounded-t-2xl z-50 group hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-300 pointer-events-auto cursor-pointer"
+          className={`absolute top-0 ${isIPad ? 'right-6 sm:right-8 md:right-12' : 'left-1/2 -translate-x-1/2'} -translate-y-[calc(100%-1px)] w-28 h-8 bg-white/90 dark:bg-zinc-950/90 backdrop-blur-2xl border-t border-x border-black/15 dark:border-white shadow-[0_-12px_24px_rgba(0,0,0,0.08)] flex items-center justify-center rounded-t-2xl z-50 group hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-300 pointer-events-auto cursor-pointer`}
           title={language === 'he' ? (isCatalogCollapsed ? 'פתח קטלוג' : 'סגור קטלוג') : (isCatalogCollapsed ? 'Open Catalog' : 'Close Catalog')}
         >
           <div className="flex items-center justify-center w-full h-full pb-0.5">
@@ -2791,6 +2784,7 @@ const App: React.FC = () => {
           currentPrefetchFile={prefetchQueue[currentPrefetchIndex]?.name || ''}
           onTogglePrefetchPause={() => setIsPrefetchPaused(prev => !prev)}
           searchQuery={catalogSearchQuery}
+          isCatalogCollapsed={isCatalogCollapsed}
         />
       </div>
 
