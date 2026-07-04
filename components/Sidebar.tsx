@@ -708,7 +708,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     <div className="w-full h-full flex flex-col p-2.5 sm:p-3 overflow-hidden select-none bg-white dark:bg-zinc-950" dir={isRTL ? 'rtl' : 'ltr'}>
       {/* Top row: Title, Refresh Button, and Categories scroll */}
       <div className="flex flex-row items-center justify-between gap-3 px-1 sm:px-3 mb-2 h-9 shrink-0">
-        <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+        <div className={`hidden ${isIPad ? 'hidden' : 'sm:flex'} items-center gap-1.5 shrink-0`}>
           <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></div>
           <h2 className={`text-[11px] sm:text-[12px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-wider'} text-zinc-800 dark:text-zinc-200`}>
             {t.productsCatalog}
@@ -800,7 +800,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         ) : (
           <div 
             key={isCatalogCollapsed ? 'collapsed' : 'expanded'}
-            className="w-full h-full flex flex-row gap-3 overflow-x-auto overflow-y-hidden custom-scroll items-center pb-1 px-1.5 scrollbar-thin select-none"
+            className={`w-full h-full flex ${isIPad ? 'flex-col overflow-y-auto overflow-x-hidden pr-1.5 pb-8' : 'flex-row overflow-x-auto overflow-y-hidden items-center pb-1'} gap-3 custom-scroll px-1.5 scrollbar-thin select-none`}
           >
             {filteredProducts.length === 0 ? (
               <div className="text-[10px] text-zinc-400 font-bold text-center py-4 italic w-full">
@@ -853,7 +853,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       }
                       onAddFromUrl(file.url, file.name);
                     }}
-                    className={`${animClass} flex flex-row gap-2.5 p-2 bg-zinc-50/70 dark:bg-zinc-900/60 border-[1px] rounded-2xl transition-all group shadow-sm overflow-hidden relative items-center hover:scale-[1.02] active:scale-[0.98] w-[230px] sm:w-[250px] h-[86px] shrink-0 cursor-pointer ${
+                    className={`${animClass} flex flex-row gap-2.5 p-2 bg-zinc-50/70 dark:bg-zinc-900/60 border-[1px] rounded-2xl transition-all group shadow-sm overflow-hidden relative items-center hover:scale-[1.02] active:scale-[0.98] ${isIPad ? 'w-full' : 'w-[230px] sm:w-[250px]'} h-[86px] shrink-0 cursor-pointer ${
                       isSelected 
                         ? 'border-yellow-500 dark:border-white bg-yellow-50/20 dark:bg-white/10 font-bold' 
                         : isOutOfStock 
