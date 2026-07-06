@@ -837,7 +837,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
     );
     // iOS Safari has extremely tight RAM limits per tab. Spawning more than 2 concurrent texture decodes on high-res textures
     // easily triggers an Out-of-Memory (OOM) crash. Limit concurrency to 2 on iOS/iPad, 3 on other mobile, and 6 on desktop.
-    const activeLoadsLimit = isIOS ? 2 : (isMobileDevice ? 3 : 6);
+    const activeLoadsLimit = isIOS ? 1 : (isMobileDevice ? 3 : 6);
 
     const loadSingleTexture = ({ url: u, isColor }: { url: string; isColor: boolean }): Promise<void> => {
       return new Promise<void>((resolve) => {
