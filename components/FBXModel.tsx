@@ -71,8 +71,8 @@ function ensureUVs(geometry: THREE.BufferGeometry) {
     geometry.computeBoundingBox();
   }
   const bbox = geometry.boundingBox || new THREE.Box3();
-  const min = bbox.min;
-  const max = bbox.max;
+  const min = bbox.min || new THREE.Vector3(0, 0, 0);
+  const max = bbox.max || new THREE.Vector3(0, 0, 0);
   
   const width = Math.max(max.x - min.x, 0.0001);
   const height = Math.max(max.y - min.y, 0.0001);
@@ -822,8 +822,22 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
     // Controlled queue execution to prevent WebGL/Browser freezing under heavy parallel decode load
     let currentIndex = 0;
-    const isMobileDevice = typeof window !== 'undefined' && (window.innerWidth < 768 || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent));
-    const activeLoadsLimit = isMobileDevice ? 4 : 6; // Dynamically limit concurrency (4 on mobile, 6 on desktop) to prevent iOS/Android memory crashes and UI freezes
+    const isIPad = typeof window !== 'undefined' && (
+      /iPad/i.test(navigator.userAgent) || 
+      (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1)
+    );
+    const isMobileDevice = typeof window !== 'undefined' && (
+      window.innerWidth < 768 || 
+      /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || 
+      isIPad
+    );
+    const isIOS = typeof window !== 'undefined' && (
+      /iPhone|iPad/i.test(navigator.userAgent) || 
+      isIPad
+    );
+    // iOS Safari has extremely tight RAM limits per tab. Spawning more than 2 concurrent texture decodes on high-res textures
+    // easily triggers an Out-of-Memory (OOM) crash. Limit concurrency to 2 on iOS/iPad, 3 on other mobile, and 6 on desktop.
+    const activeLoadsLimit = isIOS ? 2 : (isMobileDevice ? 3 : 6);
 
     const loadSingleTexture = ({ url: u, isColor }: { url: string; isColor: boolean }): Promise<void> => {
       return new Promise<void>((resolve) => {
