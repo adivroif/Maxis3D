@@ -104,13 +104,17 @@ const CameraHandler: React.FC<{
           box.getCenter(center);
           
           // Target the center of the mesh
-          controlsRef.current.target.lerp(center, 0.02);
+          if (controlsRef.current && controlsRef.current.target) {
+            controlsRef.current.target.lerp(center, 0.02);
+          }
           
           // If we have a targetView, maintain the relative offset from the moving center
-          if (currentTargetView) {
+          if (currentTargetView && currentTargetView.pos && currentTargetView.lookAt) {
             const offset = currentTargetView.pos.clone().sub(currentTargetView.lookAt);
             const dynamicTargetPos = center.clone().add(offset);
-            camera.position.lerp(dynamicTargetPos, 0.02);
+            if (camera.position) {
+              camera.position.lerp(dynamicTargetPos, 0.02);
+            }
           }
           
           trackingSucceeded = true;
@@ -120,10 +124,14 @@ const CameraHandler: React.FC<{
       }
 
       // Fallback if no active part tracking is active or if tracking failed/mesh is stale
-      if (!trackingSucceeded && currentTargetView) {
+      if (!trackingSucceeded && currentTargetView && currentTargetView.pos && currentTargetView.lookAt) {
         try {
-          camera.position.lerp(currentTargetView.pos, 0.02);
-          controlsRef.current.target.lerp(currentTargetView.lookAt, 0.02);
+          if (camera.position) {
+            camera.position.lerp(currentTargetView.pos, 0.02);
+          }
+          if (controlsRef.current && controlsRef.current.target) {
+            controlsRef.current.target.lerp(currentTargetView.lookAt, 0.02);
+          }
         } catch (err) {
           console.warn("[CameraHandler] Failed to lerp targetView:", err);
         }
@@ -2206,7 +2214,7 @@ const App: React.FC = () => {
         {selectedModel && relevantVariants.length > 1 && (
           <div 
             className="absolute left-1/2 -translate-x-1/2 z-[45] flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
-            style={{ bottom: isIPad ? (isCatalogCollapsed ? '32px' : '260px') : (isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px')) }}
+            style={{ bottom: isIPad ? (isCatalogCollapsed ? '96px' : '240px') : (isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px')) }}
           >
             <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
               <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
@@ -2274,9 +2282,13 @@ const App: React.FC = () => {
 
             {/* PRODUCT INFO PANEL */}
             <div 
-              className={`absolute top-1/2 -translate-y-1/2 sm:top-[calc(50%+24px)] left-0 w-[280px] sm:w-[320px] lg:w-[380px] h-[55vh] sm:h-[80vh] backdrop-blur-3xl shadow-[25px_0_80px_rgba(0,0,0,0.15)] transition-all duration-500 transform overflow-hidden flex flex-col pointer-events-auto antialiased font-sans ${
+              className={`absolute left-0 backdrop-blur-3xl shadow-[25px_0_80px_rgba(0,0,0,0.15)] transition-all duration-500 transform overflow-hidden flex flex-col pointer-events-auto antialiased font-sans ${
+                isIPad 
+                  ? 'top-1/2 -translate-y-1/2 w-[240px] sm:w-[240px] h-[55vh] sm:h-[55vh] rounded-r-[2rem]' 
+                  : 'top-1/2 -translate-y-1/2 sm:top-[calc(50%+24px)] w-[280px] sm:w-[320px] lg:w-[380px] h-[55vh] sm:h-[80vh] rounded-r-[3rem]'
+              } ${
                 isProductInfoOpen ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0'
-              } rounded-r-[3rem] ${
+              } ${
                 isNightMode 
                   ? 'bg-zinc-900/95 border-t border-r border-b border-white/60' 
                   : 'bg-white/98 border-r border-black/10'
@@ -2286,8 +2298,8 @@ const App: React.FC = () => {
                 zIndex: 111
               }}
             >
-              <div className="p-8 flex flex-col h-full">
-                <div className="flex items-center justify-between mb-8">
+              <div className={`${isIPad ? 'p-5' : 'p-8'} flex flex-col h-full`}>
+                <div className={`flex items-center justify-between ${isIPad ? 'mb-4' : 'mb-8'}`}>
                   <div 
                     className={`flex flex-col ${productDetails?.linkTo ? 'cursor-pointer group/title' : ''}`}
                     onClick={() => {
@@ -2304,13 +2316,15 @@ const App: React.FC = () => {
                         </svg>
                       )}
                     </div>
-                    <h2 className={`text-xl sm:text-2xl font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal leading-tight' : 'tracking-tighter leading-none'} transition-colors ${
+                    <h2 className={`font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal leading-tight' : 'tracking-tighter leading-none'} transition-colors ${
+                      isIPad ? 'text-lg' : 'text-xl sm:text-2xl'
+                    } ${
                       isNightMode 
                         ? 'text-white group-hover/title:text-yellow-400' 
                         : 'text-zinc-800 group-hover/title:text-yellow-600'
                     }`}>{productDetails?.title || translatedSelectedModelName || selectedModel.name}</h2>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-1.5 sm:gap-2">
                     {/* Share Button */}
                     <button
                       onClick={() => {
@@ -2331,25 +2345,29 @@ const App: React.FC = () => {
                             });
                         }
                       }}
-                      className={`w-10 h-10 flex items-center justify-center rounded-2xl transition-all ${
+                      className={`flex items-center justify-center transition-all ${
+                        isIPad ? 'w-8 h-8 rounded-xl' : 'w-10 h-10 rounded-2xl'
+                      } ${
                         isNightMode 
                           ? 'bg-zinc-800 hover:bg-zinc-700 text-yellow-400 border border-white/20' 
                           : 'bg-zinc-100 hover:bg-zinc-200 text-yellow-600 border border-black/5'
                       }`}
                       title={language === 'he' ? 'העתק קישור שיתוף' : 'Copy Share Link'}
                     >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className={isIPad ? 'w-4 h-4' : 'w-5 h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
                       </svg>
                     </button>
 
                     <button 
                       onClick={() => setIsProductInfoOpen(false)}
-                      className={`w-10 h-10 flex items-center justify-center rounded-2xl transition-all ${
+                      className={`flex items-center justify-center transition-all ${
+                        isIPad ? 'w-8 h-8 rounded-xl' : 'w-10 h-10 rounded-2xl'
+                      } ${
                         isNightMode ? 'bg-zinc-800 hover:bg-zinc-700 text-white border border-white/20' : 'bg-zinc-100 hover:bg-zinc-200 text-zinc-400'
                       }`}
                     >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className={isIPad ? 'w-4 h-4' : 'w-5 h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" />
                       </svg>
                     </button>
@@ -2395,19 +2413,19 @@ const App: React.FC = () => {
                     )}
 
                     {/* Description Section */}
-                    <div className={`p-6 rounded-3xl border ${
+                    <div className={`${isIPad ? 'p-4' : 'p-6'} rounded-3xl border ${
                       isNightMode ? 'bg-zinc-800/50 border-white/30' : 'bg-zinc-50/50 border-black/5'
                     }`}>
-                      <h3 className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} mb-4 ${isNightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                      <h3 className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isIPad ? 'mb-2' : 'mb-4'} ${isNightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
                         {t.productDescription}
                       </h3>
                       {isFetchingDetails ? (
-                        <p className={`text-sm leading-relaxed font-normal ${isNightMode ? 'text-zinc-300' : 'text-zinc-700'} whitespace-pre-wrap`}>
+                        <p className={`text-xs sm:text-sm leading-relaxed font-normal ${isNightMode ? 'text-zinc-300' : 'text-zinc-700'} whitespace-pre-wrap`}>
                           {t.loading}
                         </p>
                       ) : (
                         <div 
-                          className={`text-sm leading-relaxed font-normal ${isNightMode ? 'text-zinc-300' : 'text-zinc-700'} whitespace-pre-wrap`}
+                          className={`text-xs sm:text-sm leading-relaxed font-normal ${isNightMode ? 'text-zinc-300' : 'text-zinc-700'} whitespace-pre-wrap`}
                           dangerouslySetInnerHTML={{ __html: productDetails?.description || t.noDescription }}
                         />
                       )}
@@ -2709,14 +2727,14 @@ const App: React.FC = () => {
         {/* BOTTOM LEFT DESCRIPTION BOX */}
         {activePart && (
           <div 
-            className={`absolute left-6 z-50 ${isIPad ? 'w-[190px] p-3 rounded-[1.5rem]' : 'w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 rounded-[2rem]'} bg-white/95 backdrop-blur-2xl shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 ${isIPad ? 'max-h-[105px]' : 'max-h-[70vh]'} flex flex-col transition-all duration-500 ease-in-out`} 
-            style={{ bottom: isIPad ? (isCatalogCollapsed ? '32px' : '260px') : (isCatalogCollapsed ? '44px' : (isMobile ? '249px' : '282px')) }}
+            className={`absolute left-6 z-50 ${isIPad ? 'w-[170px] p-2.5 rounded-[1.25rem]' : 'w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 rounded-[2rem]'} bg-white/95 backdrop-blur-2xl shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 ${isIPad ? 'max-h-[92px]' : 'max-h-[70vh]'} flex flex-col transition-all duration-500 ease-in-out`} 
+            style={{ bottom: isIPad ? (isCatalogCollapsed ? '96px' : '262px') : (isCatalogCollapsed ? '44px' : (isMobile ? '249px' : '282px')) }}
             dir={isRTL ? 'rtl' : 'ltr'}
           >
-            <div className="flex items-center justify-between mb-3 sm:mb-4 shrink-0">
+            <div className={`flex items-center justify-between shrink-0 ${isIPad ? 'mb-1.5' : 'mb-3 sm:mb-4'}`}>
               <div className="flex flex-col">
                 <span className="text-[8px] font-black uppercase tracking-[0.3em] text-blue-600 leading-none mb-1">{t.partDetails}</span>
-                <h3 className={`font-black text-zinc-800 uppercase tracking-tight break-words whitespace-normal max-w-[180px] sm:max-w-none ${isIPad ? 'text-xs sm:text-sm' : 'text-base sm:text-lg'}`}>{activePart.name}</h3>
+                <h3 className={`font-black text-zinc-800 uppercase tracking-tight break-words whitespace-normal max-w-[180px] sm:max-w-none ${isIPad ? 'text-[11px] sm:text-xs leading-none' : 'text-base sm:text-lg'}`}>{activePart.name}</h3>
               </div>
               <button 
                 onClick={() => { 
@@ -2725,17 +2743,17 @@ const App: React.FC = () => {
                   stopSpeaking(); 
                   setTargetView({ pos: defaultCamPos, lookAt: new THREE.Vector3(0, 0, 0) });
                 }}
-                className={`flex items-center justify-center rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-400 hover:text-zinc-800 transition-all ${isIPad ? 'w-6 h-6' : 'w-8 h-8 sm:w-10 sm:h-10 sm:rounded-2xl'} ${isRTL ? 'mr-auto' : 'ml-auto'}`}
+                className={`flex items-center justify-center rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-400 hover:text-zinc-800 transition-all ${isIPad ? 'w-5 h-5' : 'w-8 h-8 sm:w-10 sm:h-10 sm:rounded-2xl'} ${isRTL ? 'mr-auto' : 'ml-auto'}`}
               >
-                <svg className={isIPad ? 'w-3 h-3' : 'w-4 h-4 sm:w-5 sm:h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className={isIPad ? 'w-2.5 h-2.5' : 'w-4 h-4 sm:w-5 sm:h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            <div className={`h-[1px] w-full bg-zinc-100 shrink-0 ${isIPad ? 'mb-2' : 'mb-3 sm:mb-4'}`}></div>
+            <div className={`h-[1px] w-full bg-zinc-100 shrink-0 ${isIPad ? 'mb-1.5' : 'mb-3 sm:mb-4'}`}></div>
             <div className="overflow-y-auto pr-2 no-scrollbar flex-1">
               <div 
-                className={`text-zinc-600 leading-relaxed font-medium whitespace-pre-wrap ${isIPad ? 'text-[11px]' : 'text-xs sm:text-sm'}`}
+                className={`text-zinc-600 leading-relaxed font-medium whitespace-pre-wrap ${isIPad ? 'text-[10px] leading-snug' : 'text-xs sm:text-sm'}`}
                 dangerouslySetInnerHTML={{ __html: activePart.description || t.noDescription }}
               />
 
