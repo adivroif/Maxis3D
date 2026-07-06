@@ -1,4 +1,39 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { useLoader, useFrame } from '@react-three/fiber';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { TGALoader } from 'three/examples/jsm/loaders/TGALoader.js';
+import { DDSLoader } from 'three/examples/jsm/loaders/DDSLoader.js';
+import { Html } from '@react-three/drei';
+import * as THREE from 'three';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import '../types';
+import { MaterialSettings, ModelPart, TextureSet } from '../types';
+
+const R2_PUBLIC_BASE_URL = 'https://files.fbxstudio.co.il/';
+const R2_PROXY_BASE_URL = '';
+
+function safeDecodeRepeated(value: string): string {
+  let current = value;
+  for (let i = 0; i < 4; i++) {
+    try {
+      const next = decodeURIComponent(current);
+      if (next === current) break;
+      current = next;
+    } catch {
+      break;
+    }
+  }
+  return current;
+}
+
+function buildR2PublicUrl(key: string): string {
+  const decodedKey = safeDecodeRepeated(key.replace(/^\/+/, ''));
+  // Ensure we don't end up with double slashes
+  const baseUrl = R2_PUBLIC_BASE_URL.endsWith('/') ? R2_PUBLIC_BASE_URL : `${R2_PUBLIC_BASE_URL}/`;
+  return `${baseUrl}${decodedKey}`;
+}
+
+function normalizeTextureLoadUrl(url: string): string {
   if (!url || typeof url !== 'string') return url;
 
   try {
@@ -1494,12 +1529,17 @@ const FBXModel: React.FC<FBXModelProps> = ({
     fbx.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
-        const partInfo = modelParts.find(p =>
-          (p.presentAtSite !== false) && (
-            p.partName.toLowerCase().trim() === mesh.name.toLowerCase().trim() ||
-            mesh.name.toLowerCase().trim().includes(p.partName.toLowerCase().trim())
-          )
-        );
+        const partInfo = modelParts.find(p => {
+          if (p.presentAtSite === false) return false;
+          const meshNameLower = mesh.name.toLowerCase().trim();
+          const pNameLower = p.partName.toLowerCase().trim();
+          const pKeyLower = (p.partKey || "").toLowerCase().trim();
+          
+          return (
+            (pNameLower !== "" && (meshNameLower === pNameLower || meshNameLower.includes(pNameLower))) ||
+            (pKeyLower !== "" && (meshNameLower === pKeyLower || meshNameLower.includes(pKeyLower)))
+          );
+        });
         if (partInfo?.description) {
           const tr = translatedParts[partInfo.id];
           detected.push({ id: partInfo.id, mesh, description: tr?.description || partInfo.description, name: tr?.name || mesh.name });
