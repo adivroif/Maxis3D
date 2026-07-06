@@ -2734,7 +2734,13 @@ const App: React.FC = () => {
         {activePart && (
           <div 
             className={`absolute left-6 z-50 ${isIPad ? 'w-[170px] p-2.5 rounded-[1.25rem]' : 'w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 rounded-[2rem]'} bg-white/95 backdrop-blur-2xl shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 ${isIPad ? 'max-h-[92px]' : 'max-h-[70vh]'} flex flex-col transition-all duration-500 ease-in-out`} 
-            style={{ bottom: isIPad ? (isCatalogCollapsed ? '96px' : '262px') : (isCatalogCollapsed ? '44px' : (isMobile ? '249px' : '282px')) }}
+            style={{ 
+              bottom: isIPad 
+                ? (isCatalogCollapsed ? '96px' : '262px') 
+                : (isCatalogCollapsed 
+                  ? (isMobile ? '96px' : '44px') 
+                  : (isMobile ? '295px' : '282px')) 
+            }}
             dir={isRTL ? 'rtl' : 'ltr'}
           >
             <div className={`flex items-center justify-between shrink-0 ${isIPad ? 'mb-1.5' : 'mb-3 sm:mb-4'}`}>
