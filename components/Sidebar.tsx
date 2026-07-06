@@ -800,7 +800,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         ) : (
           <div 
             key={isCatalogCollapsed ? 'collapsed' : 'expanded'}
-            className="w-full h-full flex flex-row gap-3 overflow-x-auto overflow-y-hidden custom-scroll items-center pb-1 px-1.5 scrollbar-thin select-none"
+            className="w-full h-full flex flex-row overflow-x-auto overflow-y-hidden items-center pb-1 gap-3 custom-scroll px-1.5 scrollbar-thin select-none"
           >
             {filteredProducts.length === 0 ? (
               <div className="text-[10px] text-zinc-400 font-bold text-center py-4 italic w-full">
