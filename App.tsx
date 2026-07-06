@@ -2733,7 +2733,7 @@ const App: React.FC = () => {
         {/* BOTTOM LEFT DESCRIPTION BOX */}
         {activePart && (
           <div 
-            className={`absolute left-6 z-50 ${isIPad ? 'w-[170px] p-2.5 rounded-[1.25rem]' : 'w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 rounded-[2rem]'} bg-white/95 backdrop-blur-2xl shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 ${isIPad ? 'max-h-[92px]' : 'max-h-[70vh]'} flex flex-col transition-all duration-500 ease-in-out`} 
+            className={`absolute left-6 z-50 ${isIPad ? 'w-[280px] p-5 rounded-[1.75rem]' : 'w-[calc(100%-3rem)] sm:w-80 p-5 sm:p-6 rounded-[2rem]'} bg-white/95 backdrop-blur-2xl shadow-[0_25px_60px_rgba(0,0,0,0.2)] border border-white/40 animate-in slide-in-from-bottom-10 fade-in duration-500 ${isIPad ? 'max-h-[250px]' : 'max-h-[70vh]'} flex flex-col transition-all duration-500 ease-in-out`} 
             style={{ 
               bottom: isIPad 
                 ? (isCatalogCollapsed ? '96px' : '262px') 
@@ -2743,10 +2743,10 @@ const App: React.FC = () => {
             }}
             dir={isRTL ? 'rtl' : 'ltr'}
           >
-            <div className={`flex items-center justify-between shrink-0 ${isIPad ? 'mb-1.5' : 'mb-3 sm:mb-4'}`}>
+            <div className={`flex items-center justify-between shrink-0 ${isIPad ? 'mb-2.5' : 'mb-3 sm:mb-4'}`}>
               <div className="flex flex-col">
                 <span className="text-[8px] font-black uppercase tracking-[0.3em] text-blue-600 leading-none mb-1">{t.partDetails}</span>
-                <h3 className={`font-black text-zinc-800 uppercase tracking-tight break-words whitespace-normal max-w-[180px] sm:max-w-none ${isIPad ? 'text-[11px] sm:text-xs leading-none' : 'text-base sm:text-lg'}`}>{activePart.name}</h3>
+                <h3 className={`font-black text-zinc-800 uppercase tracking-tight break-words whitespace-normal max-w-[180px] sm:max-w-none ${isIPad ? 'text-sm sm:text-base leading-snug' : 'text-base sm:text-lg'}`}>{activePart.name}</h3>
               </div>
               <button 
                 onClick={() => { 
@@ -2755,21 +2755,19 @@ const App: React.FC = () => {
                   stopSpeaking(); 
                   setTargetView({ pos: defaultCamPos, lookAt: new THREE.Vector3(0, 0, 0) });
                 }}
-                className={`flex items-center justify-center rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-400 hover:text-zinc-800 transition-all ${isIPad ? 'w-5 h-5' : 'w-8 h-8 sm:w-10 sm:h-10 sm:rounded-2xl'} ${isRTL ? 'mr-auto' : 'ml-auto'}`}
+                className={`flex items-center justify-center rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-400 hover:text-zinc-800 transition-all ${isIPad ? 'w-7 h-7' : 'w-8 h-8 sm:w-10 sm:h-10 sm:rounded-2xl'} ${isRTL ? 'mr-auto' : 'ml-auto'}`}
               >
-                <svg className={isIPad ? 'w-2.5 h-2.5' : 'w-4 h-4 sm:w-5 sm:h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className={isIPad ? 'w-3.5 h-3.5' : 'w-4 h-4 sm:w-5 sm:h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            <div className={`h-[1px] w-full bg-zinc-100 shrink-0 ${isIPad ? 'mb-1.5' : 'mb-3 sm:mb-4'}`}></div>
+            <div className={`h-[1px] w-full bg-zinc-100 shrink-0 ${isIPad ? 'mb-2.5' : 'mb-3 sm:mb-4'}`}></div>
             <div className="overflow-y-auto pr-2 no-scrollbar flex-1">
               <div 
-                className={`text-zinc-600 leading-relaxed font-medium whitespace-pre-wrap ${isIPad ? 'text-[10px] leading-snug' : 'text-xs sm:text-sm'}`}
+                className={`text-zinc-600 leading-relaxed font-medium whitespace-pre-wrap ${isIPad ? 'text-xs sm:text-sm' : 'text-xs sm:text-sm'}`}
                 dangerouslySetInnerHTML={{ __html: activePart.description || t.noDescription }}
               />
-
-
             </div>
           </div>
         )}
