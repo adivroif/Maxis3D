@@ -2214,7 +2214,7 @@ const App: React.FC = () => {
         {selectedModel && relevantVariants.length > 1 && (
           <div 
             className="absolute left-1/2 -translate-x-1/2 z-[45] flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
-            style={{ bottom: isIPad ? (isCatalogCollapsed ? '74px' : '240px') : (isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px')) }}
+            style={{ bottom: isIPad ? (isCatalogCollapsed ? '96px' : '240px') : (isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px')) }}
           >
             <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
               <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
@@ -2284,7 +2284,7 @@ const App: React.FC = () => {
             <div 
               className={`absolute left-0 backdrop-blur-3xl shadow-[25px_0_80px_rgba(0,0,0,0.15)] transition-all duration-500 transform overflow-hidden flex flex-col pointer-events-auto antialiased font-sans ${
                 isIPad 
-                  ? 'top-1/2 -translate-y-1/2 w-[300px] sm:w-[300px] h-[55vh] sm:h-[55vh] rounded-r-[2rem]' 
+                  ? 'top-1/2 -translate-y-1/2 w-[350px] sm:w-[300px] h-[55vh] sm:h-[55vh] rounded-r-[2rem]' 
                   : 'top-1/2 -translate-y-1/2 sm:top-[calc(50%+24px)] w-[280px] sm:w-[320px] lg:w-[380px] h-[55vh] sm:h-[80vh] rounded-r-[3rem]'
               } ${
                 isProductInfoOpen ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0'
