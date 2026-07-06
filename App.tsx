@@ -2214,7 +2214,7 @@ const App: React.FC = () => {
         {selectedModel && relevantVariants.length > 1 && (
           <div 
             className="absolute left-1/2 -translate-x-1/2 z-[51] flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
-            style={{ bottom: isIPad ? (isCatalogCollapsed ? '110px' : '290px') : (isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px')) }}
+            style={{ bottom: isIPad ? (isCatalogCollapsed ? '120px' : '270px') : (isCatalogCollapsed ? '52px' : (isMobile ? '257px' : '282px')) }}
           >
             <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
               <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
