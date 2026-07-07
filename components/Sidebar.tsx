@@ -891,8 +891,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </div>
 
                     <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-1 w-full">
-                        <span className={`text-[11px] font-black uppercase tracking-wider transition-colors leading-tight truncate ${
+                      <div className="flex items-start justify-between gap-1 w-full">
+                        <span className={`text-[11px] font-black uppercase tracking-wider transition-colors leading-tight line-clamp-none break-words whitespace-normal flex-1 ${
                           isOutOfStock ? 'text-zinc-400 line-through decoration-red-500/50 decoration-2' : isSelected ? 'text-yellow-600 dark:text-yellow-500' : 'text-zinc-800 dark:text-zinc-200 group-hover:text-yellow-600 dark:group-hover:text-yellow-500'
                         }`}>
                           {displayName}
