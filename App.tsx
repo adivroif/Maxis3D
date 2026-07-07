@@ -2290,7 +2290,7 @@ const App: React.FC = () => {
             <div 
               className={`absolute left-0 backdrop-blur-3xl shadow-[25px_0_80px_rgba(0,0,0,0.15)] transition-all duration-500 transform overflow-hidden flex flex-col pointer-events-auto antialiased font-sans ${
                 isIPad 
-                  ? 'top-1/2 -translate-y-1/2 w-[400px] sm:w-[400px] h-[55vh] sm:h-[55vh] rounded-r-[2rem]' 
+                  ? 'top-1/2 -translate-y-1/2 w-[400px] sm:w-[400px] h-[75vh] sm:h-[75vh] rounded-r-[2rem]' 
                   : 'top-1/2 -translate-y-1/2 sm:top-[calc(50%+24px)] w-[280px] sm:w-[320px] lg:w-[380px] h-[55vh] sm:h-[80vh] rounded-r-[3rem]'
               } ${
                 isProductInfoOpen ? 'translate-x-0 opacity-100' : '-translate-x-full opacity-0'
