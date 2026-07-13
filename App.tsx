@@ -214,6 +214,21 @@ async function fetchWithProgress(url: string, onProgress: (loaded: number, total
   return new Blob(chunks);
 }
 
+const INITIAL_PRODUCT_DISPLAY_TITLES: Record<string, string> = {
+  'avyra': 'AVYRA 633',
+  'axe': 'The Leviathan Axe',
+  'chest': 'Chest',
+  'connector': 'K804-005-07M9-19SA',
+  'elsa 2 caliper guide pin 35x144mm': 'ELSA 2 Caliper Guide Pin 35X144mm',
+  'full ship': 'Fantasy Space Ship Dragon Ball Daima',
+  'guide pin with bolt for elsa 2 caliper kit': 'Guide Pin With Bolt For ELSA 2 Caliper Kit',
+  'hemnes': 'HEMNES',
+  'maxx19 push plate': 'MAXX19 Push Plate',
+  'ms27476': 'MS27476',
+  'pipe': 'Smart Water Bypass Plug Adapter',
+  'shadow': 'Shadow the Hedgehog'
+};
+
 
 const App: React.FC = () => {
   const [models, setModels] = useState<SceneModelInstance[]>([]);
@@ -246,7 +261,8 @@ const App: React.FC = () => {
     originalSubCategory?: string,
     price?: number
   } | null>(null);
-  const [productTitles, setProductTitles] = useState<Record<string, string>>({});
+  const [productTitles, setProductTitles] = useState<Record<string, string>>(INITIAL_PRODUCT_DISPLAY_TITLES);
+  const [productDisplayTitles, setProductDisplayTitles] = useState<Record<string, string>>(INITIAL_PRODUCT_DISPLAY_TITLES);
   const [translatedSelectedModelName, setTranslatedSelectedModelName] = useState<string>('');
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth < 768);
   const isIPad = useMemo(() => {
@@ -394,6 +410,31 @@ const App: React.FC = () => {
 
   const selectedModel = models.find(m => m.id === selectedId);
 
+  // Memoized current model display name to prevent layout flickering when changing models
+  const currentModelDisplayName = useMemo(() => {
+    if (!selectedModel) return '';
+    const modelNameBase = selectedModel.name.replace(/\.fbx$/i, '');
+    const normalizedName = modelNameBase.trim().toLowerCase();
+    
+    // 1. If user language is Hebrew, prefer the pre-fetched display title directly if available (since it's already in Hebrew)
+    if (language === 'he' && productDisplayTitles[normalizedName]) {
+      return productDisplayTitles[normalizedName];
+    }
+    
+    // 2. If we have a fully translated selected model name, use that (handles English/Arabic/Russian/etc. gracefully)
+    if (translatedSelectedModelName) {
+      return translatedSelectedModelName;
+    }
+    
+    // 3. Fallback to pre-fetched title if available
+    if (productDisplayTitles[normalizedName]) {
+      return productDisplayTitles[normalizedName];
+    }
+    
+    // 4. Ultimate fallback to clean file name
+    return modelNameBase.replace(/_/g, ' ').replace(/-/g, ' ');
+  }, [selectedModel, translatedSelectedModelName, productDisplayTitles, language]);
+
   useEffect(() => {
     if (selectedModel?.url) {
       setFbxProgress(0);
@@ -517,6 +558,33 @@ const App: React.FC = () => {
     fetchCatalog();
   }, []);
 
+  // Pre-fetch product display titles for all catalog files to map file names to display titles
+  useEffect(() => {
+    if (catalogFiles.length === 0) return;
+    
+    catalogFiles.forEach(async (file) => {
+      const modelNameBase = file.name.replace(/\.fbx$/i, '');
+      const normalizedName = modelNameBase.trim().toLowerCase();
+      try {
+        const response = await fetch(`/api/product-details?modelName=${encodeURIComponent(modelNameBase)}&v=3`);
+        if (response.ok) {
+          const text = await response.text();
+          if (text && text.trim().length > 0) {
+            const data = JSON.parse(text);
+            const result = Array.isArray(data) ? data[0] : data;
+            if (result) {
+              const apiTitle = cleanEscapedQuotes(result.productDisplayTitle || result.productTitle || result.title || result.name || modelNameBase);
+              setProductDisplayTitles(prev => ({ ...prev, [normalizedName]: apiTitle }));
+              setProductTitles(prev => ({ ...prev, [normalizedName]: apiTitle }));
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error pre-fetching display title for:", file.name, err);
+      }
+    });
+  }, [catalogFiles]);
+
   // Automatically load model from URL search parameter (e.g. ?model=CHEST)
   useEffect(() => {
     if (catalogFiles.length === 0) return;
@@ -526,30 +594,48 @@ const App: React.FC = () => {
     
     if (modelParam) {
       const decodedParam = decodeURIComponent(modelParam).trim().toLowerCase();
-      const match = catalogFiles.find(f => {
+      
+      // 1. First try to match by file name directly
+      let match = catalogFiles.find(f => {
         const cleanName = f.name.replace(/\.fbx$/i, '').trim().toLowerCase();
         return cleanName === decodedParam || f.name.toLowerCase() === decodedParam;
       });
+      
+      // 2. If not matched, try to match by the pre-fetched display titles
+      if (!match) {
+        match = catalogFiles.find(f => {
+          const cleanName = f.name.replace(/\.fbx$/i, '').trim().toLowerCase();
+          const displayTitle = productDisplayTitles[cleanName];
+          return displayTitle && displayTitle.trim().toLowerCase() === decodedParam;
+        });
+      }
+      
       if (match) {
         console.log(`[URLParam] Auto-loading model from query param: ${match.name}`);
         handleAddFromUrl(match.url, match.name);
       }
     }
-  }, [catalogFiles]);
+  }, [catalogFiles, productDisplayTitles]);
 
   // Sync selected model to browser URL search params
   useEffect(() => {
     if (selectedModel) {
       const params = new URLSearchParams(window.location.search);
       const currentParam = params.get('model');
-      const modelName = selectedModel.name.replace(/\.fbx$/i, '');
-      if (currentParam !== modelName) {
-        params.set('model', modelName);
+      
+      const modelNameBase = selectedModel.name.replace(/\.fbx$/i, '');
+      const normalizedName = modelNameBase.trim().toLowerCase();
+      
+      // Prefer display title from pre-fetched map, then from currently active productDetails, fallback to file name base
+      const displayTitle = productDisplayTitles[normalizedName] || productDetails?.originalTitle || modelNameBase;
+      
+      if (displayTitle && currentParam !== displayTitle) {
+        params.set('model', displayTitle);
         const newUrl = `${window.location.pathname}?${params.toString()}`;
         window.history.replaceState({}, '', newUrl);
       }
     }
-  }, [selectedModel]);
+  }, [selectedModel, productDetails, productDisplayTitles]);
 
   useEffect(() => {
     const fetchTextures = async () => {
@@ -736,7 +822,7 @@ const App: React.FC = () => {
     const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
     const originalDisplayName = selectedModel.name;
     const cleanFileName = originalDisplayName.replace(/_/g, ' ').replace(/-/g, ' ');
-    const displayTitle = productDetails?.originalTitle || cleanFileName;
+    const displayTitle = productDetails?.originalTitle || productDisplayTitles[originalDisplayName.replace(/\.fbx$/i, '').trim().toLowerCase()] || cleanFileName;
     if (langName === 'English') {
       setTranslatedSelectedModelName(displayTitle);
       return;
@@ -746,7 +832,7 @@ const App: React.FC = () => {
       setTranslatedSelectedModelName(translated);
     };
     translateName();
-  }, [language, selectedModel?.name, productDetails?.originalTitle]);
+  }, [language, selectedModel?.name, productDetails?.originalTitle, productDisplayTitles]);
 
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
   const [environmentUrl, setEnvironmentUrl] = useState<string | null>(null);
@@ -1898,14 +1984,16 @@ const App: React.FC = () => {
         </a>
         {selectedModel && (
           <div className="animate-in fade-in slide-in-from-left-4 duration-500 pointer-events-auto flex flex-col gap-1 items-start text-left">
-            <div className={`text-xs sm:text-sm font-bold uppercase tracking-wider leading-tight ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
-              {translatedSelectedModelName || selectedModel.name}
+            <div className={`text-xs sm:text-sm font-bold uppercase tracking-wider leading-tight break-words whitespace-normal line-clamp-2 max-w-[calc(100vw-200px)] sm:max-w-[350px] md:max-w-none ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
+              {currentModelDisplayName}
             </div>
             <button
               onClick={() => {
                 const params = new URLSearchParams(window.location.search);
-                const modelName = selectedModel.name.replace(/\.fbx$/i, '');
-                params.set('model', modelName);
+                const modelNameBase = selectedModel.name.replace(/\.fbx$/i, '');
+                const normalizedName = modelNameBase.trim().toLowerCase();
+                const displayTitle = productDisplayTitles[normalizedName] || productDetails?.originalTitle || modelNameBase;
+                params.set('model', displayTitle);
                 const shareUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
                 navigator.clipboard.writeText(shareUrl)
                   .then(() => {
@@ -2328,16 +2416,18 @@ const App: React.FC = () => {
                       isNightMode 
                         ? 'text-white group-hover/title:text-yellow-400' 
                         : 'text-zinc-800 group-hover/title:text-yellow-600'
-                    }`}>{productDetails?.title || translatedSelectedModelName || selectedModel.name}</h2>
+                    }`}>{productDetails?.title || currentModelDisplayName}</h2>
                   </div>
                   <div className="flex gap-1.5 sm:gap-2">
                     {/* Share Button */}
                     <button
                       onClick={() => {
                         const params = new URLSearchParams(window.location.search);
-                        const modelName = selectedModel?.name.replace(/\.fbx$/i, '') || '';
-                        if (modelName) {
-                          params.set('model', modelName);
+                        if (selectedModel) {
+                          const modelNameBase = selectedModel.name.replace(/\.fbx$/i, '');
+                          const normalizedName = modelNameBase.trim().toLowerCase();
+                          const displayTitle = productDisplayTitles[normalizedName] || productDetails?.originalTitle || modelNameBase;
+                          params.set('model', displayTitle);
                           const shareUrl = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
                           navigator.clipboard.writeText(shareUrl)
                             .then(() => {
