@@ -483,7 +483,7 @@ const App: React.FC = () => {
         try {
           const folder = 'images';
           const clientName = 'tenantA';
-          const response = await fetch(`/api/files/get-images-by-model?folder=${encodeURIComponent(folder)}&modelName=${encodeURIComponent(modelName)}&clientName=${clientName}&v=3`);
+          const response = await fetch(`/api/files/get-images-by-model?folder=${encodeURIComponent(folder)}&modelName=${encodeURIComponent(modelName)}&fallbackModelName=${encodeURIComponent(normalizedModelName)}&clientName=${clientName}&v=3`);
           if (!response.ok) {
             fetchingModels.current.delete(model.id);
             return;
@@ -1347,7 +1347,7 @@ const App: React.FC = () => {
           const cleanModelName = modelNameBase.replace(/[^a-z0-9]/g, '');
           
           const searchName = productTitles[modelNameBase] || modelNameBase;
-          let isModelMatch = isModelTextureMatch(texNameNoExt, searchName);
+          let isModelMatch = isModelTextureMatch(texNameNoExt, searchName) || isModelTextureMatch(texNameNoExt, modelNameBase);
 
           // Prevent "Axe" matching "AxeHead" if "AxeHead" is another model
           if (isModelMatch) {
@@ -2556,7 +2556,7 @@ const App: React.FC = () => {
                               const selectedModelName = selectedModel?.name || '';
                               const normalizedSelectedName = selectedModelName.replace(/\.(fbx|obj|gltf|glb)$/i, '').trim().toLowerCase();
                               const searchName = productTitles[normalizedSelectedName] || selectedModelName;
-                              const modelSpecificTextures = catalogTextures.filter(t => isModelTextureMatch(t.name, searchName));
+                              const modelSpecificTextures = catalogTextures.filter(t => isModelTextureMatch(t.name, searchName) || isModelTextureMatch(t.name, normalizedSelectedName));
                               
                               const partNameForMatch = part.partName.toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
                               const partKeyForMatch = (part.partKey || '').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ').trim();
@@ -2574,8 +2574,8 @@ const App: React.FC = () => {
                                 const normalizedMatchName = modelBaseName.trim().toLowerCase();
                                 const matchSearchName = productTitles[normalizedMatchName] || modelBaseName;
                                 const matchedTex = catalogTextures.find(t => {
-                                  return isModelTextureMatch(t.name, matchSearchName) && t.name.toLowerCase().includes('preview');
-                                }) || catalogTextures.find(t => isModelTextureMatch(t.name, matchSearchName));
+                                  return (isModelTextureMatch(t.name, matchSearchName) || isModelTextureMatch(t.name, modelBaseName)) && t.name.toLowerCase().includes('preview');
+                                }) || catalogTextures.find(t => isModelTextureMatch(t.name, matchSearchName) || isModelTextureMatch(t.name, modelBaseName));
                                 if (matchedTex) {
                                   partThumbnailUrl = matchedTex.url;
                                 }

@@ -1542,7 +1542,7 @@ async function startServer() {
   // NEW: API Route for get-images-by-model from Azure Web Service
   app.get("/api/files/get-images-by-model", async (req, res) => {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-    const { folder, modelName, clientName } = req.query;
+    const { folder, modelName, fallbackModelName, clientName } = req.query;
     if (!folder || !modelName) return res.status(400).json({ error: "folder and modelName are required" });
 
     const activeClient = (clientName as string) || "tenantA";
@@ -1550,6 +1550,7 @@ async function startServer() {
 
     const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".tga", ".dds", ".gif", ".bmp"];
     const modelNameStr = (modelName as string).toLowerCase();
+    const fallbackModelNameStr = fallbackModelName ? (fallbackModelName as string).toLowerCase() : null;
 
     // Robust model texture matching algorithm
     const isModelTextureMatch = (fileName: string, modelName: string): boolean => {
@@ -1649,7 +1650,7 @@ async function startServer() {
             const ext = path.extname(fileName);
             if (!imageExtensions.includes(ext)) return false;
             
-            return isModelTextureMatch(fileName, modelNameStr);
+            return isModelTextureMatch(fileName, modelNameStr) || (fallbackModelNameStr && isModelTextureMatch(fileName, fallbackModelNameStr));
           });
 
         console.log(`[Cache First] Filtered down to ${filteredFiles.length} images matching '${modelName}' from cached list`);
@@ -1724,7 +1725,7 @@ async function startServer() {
         if (!imageExtensions.includes(ext)) return false;
         
         // Match using our precise matching algorithm
-        return isModelTextureMatch(fileName, modelNameStr);
+        return isModelTextureMatch(fileName, modelNameStr) || (fallbackModelNameStr && isModelTextureMatch(fileName, fallbackModelNameStr));
       });
 
     console.log(`[Azure Proxy] Filtered down to ${filteredFiles.length} images matching '${modelName}'`);
@@ -2213,7 +2214,7 @@ async function startServer() {
 
   // NEW: API Route to get images by model name (from R2)
   app.get("/api/r2/get-images-by-model", async (req, res) => {
-    const { folder, modelName } = req.query;
+    const { folder, modelName, fallbackModelName } = req.query;
     
     if (!folder || !modelName) {
       return res.status(400).json({ error: "Folder and model name are required." });
@@ -2253,6 +2254,7 @@ async function startServer() {
       
       const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".tga", ".dds", ".gif", ".bmp"];
       const modelNameStr = (modelName as string).toLowerCase();
+      const fallbackModelNameStr = fallbackModelName ? (fallbackModelName as string).toLowerCase() : null;
 
       const isModelTextureMatch = (fileName: string, modelName: string): boolean => {
         if (!fileName || !modelName) return false;
@@ -2291,7 +2293,7 @@ async function startServer() {
           if (!imageExtensions.includes(ext)) return false;
           
           const fileName = path.basename(key);
-          return isModelTextureMatch(fileName, modelNameStr);
+          return isModelTextureMatch(fileName, modelNameStr) || (fallbackModelNameStr && isModelTextureMatch(fileName, fallbackModelNameStr));
         });
 
       console.log(`[R2] Filtered down to ${filteredFiles.length} images matching '${modelName}'`);
