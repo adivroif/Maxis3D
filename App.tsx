@@ -2380,8 +2380,8 @@ const App: React.FC = () => {
                   </div>
                 </div>
                 
-                <div className="flex-1 overflow-y-auto pr-4 no-scrollbar">
-                  <div className="space-y-6">
+                <div className="flex-1 overflow-y-auto px-2 no-scrollbar">
+                  <div className="space-y-6 pb-12">
                     {/* Category & Subcategory Badges */}
                     {(productDetails?.category || productDetails?.subCategory || productDetails?.price !== undefined) && (
                       <div className="flex flex-wrap gap-2 pt-1">
@@ -2625,7 +2625,7 @@ const App: React.FC = () => {
                                                 {t.labelPartDescription}:
                                               </span>
                                               <div 
-                                                className={`text-[11px] leading-snug line-clamp-3 whitespace-pre-wrap ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
+                                                className={`text-[11px] leading-snug line-clamp-none whitespace-normal break-words ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
                                                 dangerouslySetInnerHTML={{ __html: description }}
                                               />
                                             </div>
@@ -2703,7 +2703,7 @@ const App: React.FC = () => {
                                                 {t.labelPartDescription}:
                                               </span>
                                               <div 
-                                                className={`text-[11px] leading-snug line-clamp-3 whitespace-pre-wrap ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
+                                                className={`text-[11px] leading-snug line-clamp-none whitespace-normal break-words ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
                                                 dangerouslySetInnerHTML={{ __html: description }}
                                               />
                                             </div>
