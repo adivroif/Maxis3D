@@ -49,6 +49,32 @@ function normalizeTextureLoadUrl(url: string): string {
   return url;
 }
 
+function getFallbackProxyUrl(url: string): string {
+  if (!url || typeof url !== 'string') return url;
+  if (url.startsWith('/') || url.includes('get-file') || url.includes('/api/')) {
+    return url; // Already a local proxy or API URL
+  }
+  try {
+    const pathParts = url.split('/');
+    if (pathParts.length >= 5) {
+      let folder = pathParts[pathParts.length - 2];
+      const fileName = pathParts[pathParts.length - 1];
+      
+      const isImage = /\.(png|jpg|jpeg|tga|dds|webp|gif|bmp)$/i.test(fileName);
+      if (isImage) {
+        folder = 'images';
+      }
+
+      if ((folder === 'images' || folder === 'tenants') && fileName) {
+        return `/api/files/get-file?folder=${encodeURIComponent(folder)}&fileName=${encodeURIComponent(fileName)}&clientName=tenantA`;
+      }
+    }
+  } catch (e) {
+    console.error("Error in getFallbackProxyUrl:", e);
+  }
+  return url;
+}
+
 /**
  * Automatically generates planar/box UV coordinates based on dominant normals for geometries that lack them
  * or have dummy/corrupted UV coordinates (all zero or all identical) to prevent rendering them completely black.
@@ -119,6 +145,314 @@ function ensureUVs(geometry: THREE.BufferGeometry) {
   if (geometry.attributes.uv) {
     geometry.attributes.uv.needsUpdate = true;
   }
+}
+
+
+/**
+ * Cache decoded alpha-map pixels once per texture so checking many meshes does
+ * not repeatedly redraw/read the same 2K/4K image from a canvas.
+ */
+const alphaPixelCache = new WeakMap<THREE.Texture, {
+  width: number;
+  height: number;
+  pixels: Uint8ClampedArray;
+}>();
+
+function getAlphaPixels(texture: THREE.Texture) {
+  const cached = alphaPixelCache.get(texture);
+  if (cached) return cached;
+
+  const image = texture.image as CanvasImageSource & { width?: number; height?: number };
+  const width = Number(image?.width || 0);
+  const height = Number(image?.height || 0);
+  if (!image || !width || !height) return null;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  try {
+    ctx.drawImage(image, 0, 0, width, height);
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    const result = { width, height, pixels };
+    alphaPixelCache.set(texture, result);
+    return result;
+  } catch (error) {
+    console.warn('[AlphaCheck] Could not inspect alpha texture pixels; keeping transparency enabled.', error);
+    return null;
+  }
+}
+
+/**
+ * Returns true only when this mesh actually samples a non-white area of the
+ * opacity map through its UVs. This keeps meshes whose UVs live entirely in
+ * white/opaque areas in Three.js' opaque render pass, even when they share the
+ * same material/texture atlas with genuinely transparent meshes.
+ */
+function meshActuallyUsesTransparency(
+  geometry: THREE.BufferGeometry,
+  texture: THREE.Texture,
+  opaqueThreshold = 0.995
+): boolean {
+  const uv = geometry.attributes.uv as THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined;
+  if (!uv || uv.count === 0) return false;
+
+  const alphaData = getAlphaPixels(texture);
+  if (!alphaData) {
+    // Safe fallback: if CORS/browser restrictions prevent inspection, preserve
+    // the alpha map instead of accidentally making a transparent mesh opaque.
+    return true;
+  }
+
+  const { width, height, pixels } = alphaData;
+  const transformed = new THREE.Vector2();
+
+  const sample = (u: number, v: number) => {
+    transformed.set(u, v);
+    texture.transformUv(transformed); // applies matrix, wrapping and flipY
+
+    const x = Math.min(width - 1, Math.max(0, Math.floor(transformed.x * width)));
+    const y = Math.min(height - 1, Math.max(0, Math.floor(transformed.y * height)));
+    const offset = (y * width + x) * 4;
+
+    // THREE.js alphaMap uses the green channel. For grayscale opacity maps,
+    // R=G=B, so this samples the authored opacity directly.
+    return pixels[offset + 1] / 255;
+  };
+
+const triangleUsesAlpha = (ia: number, ib: number, ic: number) => {
+  const ua = uv.getX(ia), va = uv.getY(ia);
+  const ub = uv.getX(ib), vb = uv.getY(ib);
+  const uc = uv.getX(ic), vc = uv.getY(ic);
+
+  const steps = 8;
+
+  for (let i = 0; i <= steps; i++) {
+    for (let j = 0; j <= steps - i; j++) {
+      const a = i / steps;
+      const b = j / steps;
+      const c = 1 - a - b;
+
+      const u =
+        ua * a +
+        ub * b +
+        uc * c;
+
+      const v =
+        va * a +
+        vb * b +
+        vc * c;
+
+      if (sample(u, v) < opaqueThreshold) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
+
+  const index = geometry.getIndex();
+  if (index) {
+    for (let i = 0; i + 2 < index.count; i += 3) {
+      if (triangleUsesAlpha(index.getX(i), index.getX(i + 1), index.getX(i + 2))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  for (let i = 0; i + 2 < uv.count; i += 3) {
+    if (triangleUsesAlpha(i, i + 1, i + 2)) return true;
+  }
+
+  return false;
+}
+
+
+type MeshBoundsInfo = {
+  box: THREE.Box3;
+  size: THREE.Vector3;
+  center: THREE.Vector3;
+};
+
+function getMeshWorldBoundsInfo(mesh: THREE.Mesh): MeshBoundsInfo {
+  mesh.updateWorldMatrix(true, false);
+
+  const box = new THREE.Box3().setFromObject(mesh);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+
+  box.getSize(size);
+  box.getCenter(center);
+
+  return { box, size, center };
+}
+
+function getMaterialNames(mesh: THREE.Mesh): string[] {
+  const materials = Array.isArray(mesh.material)
+    ? mesh.material
+    : [mesh.material];
+
+  return materials
+    .filter(Boolean)
+    .map((material) => material.name || '')
+    .filter(Boolean);
+}
+
+function meshHasRealAlphaMaterial(mesh: THREE.Mesh): boolean {
+  const materials = Array.isArray(mesh.material)
+    ? mesh.material
+    : [mesh.material];
+
+  return materials.some((material) => {
+    return (
+      material instanceof THREE.MeshStandardMaterial &&
+      material.transparent === true &&
+      !!material.alphaMap
+    );
+  });
+}
+
+function meshIsOpaqueForAlpha(mesh: THREE.Mesh): boolean {
+  const materials = Array.isArray(mesh.material)
+    ? mesh.material
+    : [mesh.material];
+
+  return materials.every((material) => {
+    if (!(material instanceof THREE.MeshStandardMaterial)) {
+      return true;
+    }
+
+    return !(
+      material.transparent === true &&
+      !!material.alphaMap
+    );
+  });
+}
+
+function sameAuthoredMaterialFamily(a: THREE.Mesh, b: THREE.Mesh): boolean {
+  const aNames = getMaterialNames(a);
+  const bNames = getMaterialNames(b);
+
+  if (aNames.length === 0 || bNames.length === 0) {
+    return false;
+  }
+
+  return aNames.some((name) => bNames.includes(name));
+}
+
+function axisOverlap(
+  aMin: number,
+  aMax: number,
+  bMin: number,
+  bMax: number
+): number {
+  return Math.max(0, Math.min(aMax, bMax) - Math.max(aMin, bMin));
+}
+
+function getDominantSurfaceAxes(
+  size: THREE.Vector3
+): ['x' | 'y' | 'z', 'x' | 'y' | 'z', 'x' | 'y' | 'z'] {
+  const axes: Array<{ axis: 'x' | 'y' | 'z'; size: number }> = [
+    { axis: 'x', size: Math.abs(size.x) },
+    { axis: 'y', size: Math.abs(size.y) },
+    { axis: 'z', size: Math.abs(size.z) },
+  ];
+
+  axes.sort((a, b) => b.size - a.size);
+
+  return [axes[0].axis, axes[1].axis, axes[2].axis];
+}
+
+/**
+ * Detects an opaque mesh that is very likely an exported duplicate/cover sitting
+ * on top of a mesh that genuinely uses an opacity map.
+ *
+ * The check is intentionally conservative:
+ * - same authored material name/family;
+ * - very high 2D overlap on the transparent mesh's two dominant dimensions;
+ * - similar footprint;
+ * - centers are close along the thin/normal axis.
+ *
+ * This avoids model-name/mesh-name hardcoding and keeps ordinary opaque parts.
+ */
+function areLikelyAlphaOccludingDuplicates(
+  transparentMesh: THREE.Mesh,
+  opaqueMesh: THREE.Mesh
+): boolean {
+  if (transparentMesh === opaqueMesh) return false;
+
+  if (!sameAuthoredMaterialFamily(transparentMesh, opaqueMesh)) {
+    return false;
+  }
+
+  const a = getMeshWorldBoundsInfo(transparentMesh);
+  const b = getMeshWorldBoundsInfo(opaqueMesh);
+
+  const [axis1, axis2, thinAxis] = getDominantSurfaceAxes(a.size);
+
+  const a1 = Math.max(a.size[axis1], 1e-6);
+  const a2 = Math.max(a.size[axis2], 1e-6);
+  const b1 = Math.max(b.size[axis1], 1e-6);
+  const b2 = Math.max(b.size[axis2], 1e-6);
+
+  const overlap1 = axisOverlap(
+    a.box.min[axis1],
+    a.box.max[axis1],
+    b.box.min[axis1],
+    b.box.max[axis1]
+  );
+
+  const overlap2 = axisOverlap(
+    a.box.min[axis2],
+    a.box.max[axis2],
+    b.box.min[axis2],
+    b.box.max[axis2]
+  );
+
+  const overlapArea = overlap1 * overlap2;
+  const smallerArea = Math.max(Math.min(a1 * a2, b1 * b2), 1e-6);
+  const surfaceOverlapRatio = overlapArea / smallerArea;
+
+  const axis1Similarity = Math.min(a1, b1) / Math.max(a1, b1);
+  const axis2Similarity = Math.min(a2, b2) / Math.max(a2, b2);
+
+  const footprintSimilarity = Math.min(
+    axis1Similarity,
+    axis2Similarity
+  );
+
+  const largestSurfaceDimension = Math.max(a1, a2, b1, b2, 1e-6);
+
+  const normalCenterDistance = Math.abs(
+    a.center[thinAxis] - b.center[thinAxis]
+  );
+
+  const allowedNormalDistance = Math.max(
+    Math.abs(a.size[thinAxis]),
+    Math.abs(b.size[thinAxis]),
+    largestSurfaceDimension * 0.035
+  );
+
+  // Also require their surface centers to be reasonably aligned.
+  const surfaceCenterDistance = Math.hypot(
+    a.center[axis1] - b.center[axis1],
+    a.center[axis2] - b.center[axis2]
+  );
+
+  const normalizedSurfaceCenterDistance =
+    surfaceCenterDistance / largestSurfaceDimension;
+
+  return (
+    surfaceOverlapRatio >= 0.90 &&
+    footprintSimilarity >= 0.72 &&
+    normalCenterDistance <= allowedNormalDistance &&
+    normalizedSurfaceCenterDistance <= 0.12
+  );
 }
 
 
@@ -205,12 +539,25 @@ function getTextureSetUDIM(set: TextureSet): number | null {
  */
 function matchesAny(name: string, targets: string[]): boolean {
   const n = name.toLowerCase().trim();
+
   return targets.some((pattern) => {
     const p = pattern.toLowerCase().trim();
-    if (p === '*') return true;
-    if (!p.includes('*')) return n === p || n.includes(p);
-    // convert glob to regex: escape dots, replace * with .*
-    const re = new RegExp('^' + p.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$');
+
+    if (p === '*') {
+      return true;
+    }
+
+if (!p.includes('*')) {
+  return n === p || n.includes(p);
+}
+
+    // wildcard אמיתי
+    const escaped = p
+      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*');
+
+    const re = new RegExp(`^${escaped}$`);
+
     return re.test(n);
   });
 }
@@ -278,7 +625,8 @@ function resolveBestSet(
       const cNoDigits = c.replace(/\d+/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
 
       for (const pattern of set.targets) {
-        const p = pattern.toLowerCase().trim();
+const p = pattern.toLowerCase().trim();
+
         const pNoDigits = p.replace(/\d+/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
 
         let score = 0;
@@ -630,59 +978,104 @@ const FBXModel: React.FC<FBXModelProps> = ({
   useEffect(() => { onPartUVLayoutGeneratedRef.current = onPartUVLayoutGenerated; }, [onPartUVLayoutGenerated]);
   useEffect(() => { onFbxLoadedRef.current = onFbxLoaded; }, [onFbxLoaded]);
 
-  const fbx = useMemo(() => {
-    const clone = SkeletonUtils.clone(originalFbx);
+const fbx = useMemo(() => {
+  const clone = SkeletonUtils.clone(originalFbx);
 
-    clone.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        if (mesh.geometry) {
-          ensureUVs(mesh.geometry);
-        }
-        const convert = (m: THREE.Material | null | undefined): THREE.Material => {
-          if (!m) return new THREE.MeshStandardMaterial({ color: 0xcccccc, name: 'Fallback' });
-          
-          // Create a NEW material for every mesh to ensure isolation
-          const originalColor = (m as any).color ? (m as any).color.clone() : new THREE.Color(0xffffff);
-          const isTransparent = (m as any).transparent || (m as any).opacity < 1.0 || !!(m as any).alphaMap;
-          
-          const pbr = new THREE.MeshStandardMaterial({
-            name: m.name || `Material_${Math.random().toString(36).substr(2, 5)}`,
-            color: originalColor,
-            map: (m as any).map || null,
-            side: THREE.DoubleSide,
-            transparent: isTransparent,
-            opacity: (m as any).opacity !== undefined ? (m as any).opacity : 1.0,
-            alphaTest: (m as any).alphaTest || 0.05,
-            roughness: 1.0,
-            metalness: 0.0,
-            depthWrite: !isTransparent
-          });
+  clone.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
 
-          pbr.userData.isPBR = true;
-          pbr.userData.originalColor = originalColor;
-          pbr.userData.originalMap = (m as any).map || null;
-          pbr.userData.originalTransparent = isTransparent;
-          pbr.userData.originalOpacity = (m as any).opacity !== undefined ? (m as any).opacity : 1.0;
-          
-          if ((m as any).normalMap) pbr.normalMap = (m as any).normalMap;
-          if ((m as any).roughnessMap) pbr.roughnessMap = (m as any).roughnessMap;
-          if ((m as any).metalnessMap) pbr.metalnessMap = (m as any).metalnessMap;
-          if ((m as any).alphaMap) { 
-            pbr.alphaMap = (m as any).alphaMap; 
-            pbr.userData.originalAlphaMap = (m as any).alphaMap; 
-          }
-          return pbr;
-        };
-        
-        if (Array.isArray(mesh.material)) mesh.material = mesh.material.map(m => convert(m));
-        else mesh.material = convert(mesh.material);
+      if (mesh.geometry) {
+        // SkeletonUtils.clone keeps geometry references shared. Clone the geometry
+        // so UV generation and mesh-specific material work stay isolated to this model instance.
+        mesh.geometry = mesh.geometry.clone();
+        ensureUVs(mesh.geometry);
       }
-    });
 
-    if (originalFbx.animations) clone.animations = [...originalFbx.animations];
-    return clone;
-  }, [originalFbx]);
+      const convert = (
+        m: THREE.Material | null | undefined
+      ): THREE.Material => {
+
+        if (!m) {
+          return new THREE.MeshStandardMaterial({
+            color: 0xcccccc,
+            name: 'Fallback'
+          });
+        }
+
+        const originalColor =
+          (m as any).color
+            ? (m as any).color.clone()
+            : new THREE.Color(0xffffff);
+
+        const pbr = new THREE.MeshStandardMaterial({
+          name:
+            m.name ||
+            `Material_${Math.random().toString(36).substr(2, 5)}`,
+
+          color: originalColor,
+          map: (m as any).map || null,
+
+          roughness: 1.0,
+          metalness: 0.0
+        });
+
+        pbr.userData.isPBR = true;
+
+        pbr.userData.originalColor =
+          originalColor;
+
+        pbr.userData.originalMap =
+          (m as any).map || null;
+
+
+        if ((m as any).normalMap) {
+          pbr.normalMap =
+            (m as any).normalMap;
+        }
+
+        if ((m as any).roughnessMap) {
+          pbr.roughnessMap =
+            (m as any).roughnessMap;
+        }
+
+        if ((m as any).metalnessMap) {
+          pbr.metalnessMap =
+            (m as any).metalnessMap;
+        }
+
+        if ((m as any).alphaMap) {
+          pbr.alphaMap =
+            (m as any).alphaMap;
+
+          pbr.userData.originalAlphaMap =
+            (m as any).alphaMap;
+        }
+
+        return pbr;
+      };
+
+
+      if (Array.isArray(mesh.material)) {
+        mesh.material =
+          mesh.material.map(m => convert(m));
+      }
+      else {
+        mesh.material =
+          convert(mesh.material);
+      }
+    }
+  });
+
+
+  if (originalFbx.animations) {
+    clone.animations =
+      [...originalFbx.animations];
+  }
+
+  return clone;
+
+}, [originalFbx]);
 
   useEffect(() => {
     if (fbx && onFbxLoadedRef.current) {
@@ -728,15 +1121,18 @@ const FBXModel: React.FC<FBXModelProps> = ({
   }, [url, fbx]);
 
   // ── Compute full serialized list of all texture URLs needed for the model ──
+  // Track alpha URLs separately from color maps while using the same texture cache.
   const textureUrlsKey = useMemo(() => {
-    const seen = new Set<string>();
-    const urls: { url: string; isColor: boolean }[] = [];
+    const urlMap = new Map<string, { url: string; isColor: boolean; isAlpha: boolean }>();
 
-    const add = (u: unknown, isColor: boolean) => {
+    const add = (u: unknown, isColor: boolean, isAlpha: boolean = false) => {
       if (!u || typeof u !== 'string') return;
-      if (seen.has(u)) return;
-      seen.add(u);
-      urls.push({ url: u, isColor });
+      const existing = urlMap.get(u);
+      if (existing) {
+        if (isAlpha) existing.isAlpha = true;
+        return;
+      }
+      urlMap.set(u, { url: u, isColor, isAlpha });
     };
 
     // New textureSets API
@@ -745,7 +1141,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
       add(set.normal, false);
       add(set.metalness, false);
       add(set.roughness, false);
-      add(set.alpha, false);
+      add(set.alpha, false, true);
       add(set.emissive, true);
       add(set.ao, false);
       add(set.height, false);
@@ -756,11 +1152,12 @@ const FBXModel: React.FC<FBXModelProps> = ({
     Object.values(settings.normalMappings || {}).forEach(u => add(u, false));
     Object.values(settings.metalMappings || {}).forEach(u => add(u, false));
     Object.values(settings.roughMappings || {}).forEach(u => add(u, false));
-    Object.values(settings.alphaMappings || {}).forEach(u => add(u, false));
+    Object.values(settings.alphaMappings || {}).forEach(u => add(u, false, true));
     Object.values(settings.emissiveMappings || {}).forEach(u => add(u, true));
     Object.values(settings.aoMappings || {}).forEach(u => add(u, false));
     Object.values(settings.heightMappings || {}).forEach(u => add(u, false));
     Object.values(settings.specularMappings || {}).forEach(u => add(u, false));
+    add(settings.transparencyUrl, false, true);
 
     // Preload ALL texture mappings from color variants to enable instant material switching
     if (settings.colorVariants && Array.isArray(settings.colorVariants)) {
@@ -778,7 +1175,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
           Object.values(variant.roughMappings || {}).forEach(u => add(u, false));
         }
         if (variant.alphaMappings) {
-          Object.values(variant.alphaMappings || {}).forEach(u => add(u, false));
+          Object.values(variant.alphaMappings || {}).forEach(u => add(u, false, true));
         }
         if (variant.emissiveMappings) {
           Object.values(variant.emissiveMappings || {}).forEach(u => add(u, true));
@@ -795,15 +1192,15 @@ const FBXModel: React.FC<FBXModelProps> = ({
       });
     }
 
-    return JSON.stringify(urls);
-  }, [textureSets, settings.materialMappings, settings.normalMappings, settings.metalMappings, settings.roughMappings, settings.alphaMappings, settings.emissiveMappings, settings.aoMappings, settings.heightMappings, settings.specularMappings, settings.colorVariants]);
+    return JSON.stringify(Array.from(urlMap.values()));
+  }, [textureSets, settings.materialMappings, settings.normalMappings, settings.metalMappings, settings.roughMappings, settings.alphaMappings, settings.emissiveMappings, settings.aoMappings, settings.heightMappings, settings.specularMappings, settings.colorVariants, settings.transparencyUrl]);
 
   // ── Pre-load the remaining textures in a controlled background queue ───────
   useEffect(() => {
     let active = true;
 
     // Parse the full target texture URLs list
-    const allUrls: { url: string; isColor: boolean }[] = JSON.parse(textureUrlsKey);
+    const allUrls: { url: string; isColor: boolean; isAlpha?: boolean }[] = JSON.parse(textureUrlsKey);
 
     // Only load ones that aren't already cache-hits
     const toLoad = allUrls.filter(item => !textureCacheRef.current[item.url]);
@@ -839,7 +1236,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
     // easily triggers an Out-of-Memory (OOM) crash. Limit concurrency to 2 on iOS/iPad, 3 on other mobile, and 6 on desktop.
     const activeLoadsLimit = isIOS ? 1 : (isMobileDevice ? 3 : 6);
 
-    const loadSingleTexture = ({ url: u, isColor }: { url: string; isColor: boolean }): Promise<void> => {
+    const loadSingleTexture = ({ url: u, isColor, isAlpha }: { url: string; isColor: boolean; isAlpha?: boolean }): Promise<void> => {
       return new Promise<void>((resolve) => {
         const done = () => resolve();
 
@@ -910,7 +1307,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
           img.referrerPolicy = 'no-referrer';
           img.decoding = 'async'; // Request async out-of-thread decoding so the browser main thread remains butter smooth
           
-          let triedDirect = false;
+          let triedDirect = (loadUrl !== u);
           img.src = loadUrl;
 
           img.onload = () => {
@@ -943,6 +1340,9 @@ const FBXModel: React.FC<FBXModelProps> = ({
                   console.log(`[TextureOptimizer] Downscaled ${img.src} from ${img.width}x${img.height} to ${w}x${h} (Cap: ${maxDim})`);
                 }
               }
+
+              // Opacity maps are loaded like the other non-color PBR maps.
+              // Mesh-specific UV inspection is performed when materials are applied.
 
               const tex = new THREE.Texture(finalSource);
               tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
@@ -991,24 +1391,43 @@ const FBXModel: React.FC<FBXModelProps> = ({
                 done();
               }, undefined, (err) => {
                 console.error(`[FBXModel] ❌ Fallback failed: "${img.src}"`, err);
+                
+                // Fallback to placeholder on canvas error too
+                const placeholderCanvas = document.createElement('canvas');
+                placeholderCanvas.width = 2;
+                placeholderCanvas.height = 2;
+                const ctx = placeholderCanvas.getContext('2d');
+                if (ctx) {
+                  ctx.fillStyle = '#cccccc';
+                  ctx.fillRect(0, 0, 2, 2);
+                }
+                const tex = new THREE.Texture(placeholderCanvas);
+                tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+                tex.needsUpdate = true;
+                textureCacheRef.current[u] = tex;
+                setTextureCache(prev => {
+                  if (!active) return prev;
+                  return { ...prev, [u]: tex };
+                });
                 done();
               });
             }
           };
 
           img.onerror = (err) => {
+            const fallbackProxy = getFallbackProxyUrl(u);
             if (triedDirect) {
-              console.warn(`[TextureOptimizer] Direct R2 load failed (CORS or network error) for "${u}". Falling back to proxy: "${loadUrl}"`);
+              console.warn(`[TextureOptimizer] Direct R2 load failed (CORS or network error) for "${loadUrl}". Falling back to proxy: "${fallbackProxy}"`);
               triedDirect = false;
-              img.src = loadUrl;
+              img.src = fallbackProxy;
             } else {
-              console.error(`[TextureOptimizer] Image load error for ${loadUrl} (original: "${u}"). Trying legacy loader as fallback:`, err);
+              console.error(`[TextureOptimizer] Image load error for ${img.src} (original: "${u}"). Trying legacy loader as fallback...`, err);
               if (!active) {
                 done();
                 return;
               }
               const fallbackLoader = new THREE.TextureLoader();
-              fallbackLoader.load(loadUrl, (tex) => {
+              fallbackLoader.load(fallbackProxy, (tex) => {
                 if (!active) {
                   tex.dispose();
                   done();
@@ -1028,7 +1447,25 @@ const FBXModel: React.FC<FBXModelProps> = ({
                 });
                 done();
               }, undefined, (fallbackErr) => {
-                console.error(`[FBXModel] ❌ Fallback failed too: "${loadUrl}" (original: "${u}")`, fallbackErr);
+                console.error(`[FBXModel] ❌ Fallback failed too: "${fallbackProxy}" (original: "${u}")`, fallbackErr);
+                
+                // Create a robust 2x2 pixel grey placeholder texture so model can load safely
+                const placeholderCanvas = document.createElement('canvas');
+                placeholderCanvas.width = 2;
+                placeholderCanvas.height = 2;
+                const ctx = placeholderCanvas.getContext('2d');
+                if (ctx) {
+                  ctx.fillStyle = '#cccccc';
+                  ctx.fillRect(0, 0, 2, 2);
+                }
+                const tex = new THREE.Texture(placeholderCanvas);
+                tex.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+                tex.needsUpdate = true;
+                textureCacheRef.current[u] = tex;
+                setTextureCache(prev => {
+                  if (!active) return prev;
+                  return { ...prev, [u]: tex };
+                });
                 done();
               });
             }
@@ -1106,9 +1543,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
           const mesh = child as THREE.Mesh;
           const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
           materials.forEach((mat) => {
-            if (mat) {
-              mat.needsUpdate = true;
-            }
+            if (mat) mat.needsUpdate = true;
           });
         }
       });
@@ -1261,9 +1696,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
     fbx.traverse((child) => {
       if (!(child as THREE.Mesh).isMesh) return;
       const mesh = child as THREE.Mesh;
-      if (mesh.name.endsWith('_BackPass') || mesh.name.endsWith('_BackFacePass')) return;
-
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
 
       materials.forEach((mat) => {
         // Apply wireframe mode to all materials dynamically
@@ -1271,11 +1704,6 @@ const FBXModel: React.FC<FBXModelProps> = ({
           (mat as any).wireframe = !!settings.wireframe;
           mat.needsUpdate = true;
         }
-        if (mesh.userData.backFaceMat) {
-          (mesh.userData.backFaceMat as any).wireframe = !!settings.wireframe;
-          (mesh.userData.backFaceMat as any).needsUpdate = true;
-        }
-
         if (!(mat instanceof THREE.MeshStandardMaterial) || !mat.userData.isPBR) return;
 
         // ── 1. Resolve best TextureSet for this mesh/material ──────────────
@@ -1322,9 +1750,62 @@ const FBXModel: React.FC<FBXModelProps> = ({
         const roughTex = tex(getValidMappingUrl(settings.roughMappings?.[mat.name])) ?? tex(set?.roughness);
         mat.roughnessMap = roughTex || null;
 
-        // ── 7. Alpha ───────────────────────────────────────────────────────
-        const alphaTex = tex(getValidMappingUrl(settings.alphaMappings?.[mat.name])) ?? tex(set?.alpha);
-        mat.alphaMap = alphaTex || mat.userData.originalAlphaMap || null;
+// ── 7. Opacity / Alpha ───────────────────────────────────────────────
+
+const alphaTex =
+  tex(getValidMappingUrl(settings.alphaMappings?.[mat.name])) ??
+  tex(set?.alpha);
+
+const usesAlpha = !!(
+  alphaTex &&
+  mesh.geometry &&
+  meshActuallyUsesTransparency(mesh.geometry, alphaTex)
+);
+
+mat.opacity = 1.0;
+mat.alphaTest = 0;
+mat.alphaHash = false;
+mat.depthTest = true;
+mat.premultipliedAlpha = false;
+
+if (usesAlpha && alphaTex) {
+  mat.alphaMap = alphaTex;
+  mat.transparent = true;
+  mat.depthWrite = false;
+
+  // אל תשנה DoubleSide כרגע
+  mat.side = THREE.FrontSide;
+
+  console.log('[REAL ALPHA]', {
+    mesh: mesh.name,
+    material: mat.name,
+    materialUUID: mat.uuid,
+    alphaUUID: alphaTex.uuid,
+    hasBaseColor: !!mat.map,
+    baseColorUUID: mat.map?.uuid,
+    color: mat.color.getHexString(),
+    targets: set?.targets
+  });
+
+} else {
+  mat.alphaMap = null;
+  mat.transparent = false;
+  mat.depthWrite = true;
+  mat.side = THREE.FrontSide;
+
+  if (alphaTex) {
+    console.log('[ALPHA SKIPPED - OPAQUE UV]', {
+      mesh: mesh.name,
+      material: mat.name,
+      materialUUID: mat.uuid,
+      hasBaseColor: !!mat.map,
+      baseColorUUID: mat.map?.uuid,
+      color: mat.color.getHexString()
+    });
+  }
+}
+
+mat.needsUpdate = true;
 
         // ── 8. Emissive ────────────────────────────────────────────────────
         const emissiveTex = tex(getValidMappingUrl(settings.emissiveMappings?.[mat.name])) ?? tex(set?.emissive);
@@ -1339,9 +1820,6 @@ const FBXModel: React.FC<FBXModelProps> = ({
         mat.aoMap = aoTex || null;
         if (aoTex) { 
           mat.aoMapIntensity = 1.0; 
-          if (mesh.geometry && (!mesh.geometry.attributes || !mesh.geometry.attributes.uv2)) {
-            aoTex.channel = 0;
-          }
         }
 
         // ── 10. Height / displacement ──────────────────────────────────────
@@ -1355,74 +1833,6 @@ const FBXModel: React.FC<FBXModelProps> = ({
         mat.metalness = mat.metalnessMap ? 1.0 : settings.metalness;
         mat.roughness = mat.roughnessMap ? 1.0 : settings.roughness;
 
-        // ── 12. Transparency ───────────────────────────────────────────────
-        const isTransparent = !!mat.alphaMap || settings.opacity < 1.0 || !!mat.userData.originalTransparent;
-        
-        mat.transparent = isTransparent;
-        mat.opacity = settings.opacity;
-
-        if (isTransparent) {
-          const pn = mesh.name.toLowerCase();
-          const isInner = ['inner','rod','core','shaft','inside','piston','valve','internal','component','mechanism','heart','center','hidden','contained','inner_','inside_','solid','mass','axle','hub','engine','motor'].some(k => pn.includes(k));
-          const isShell = !isInner && ['glass','case','enclosure','housing','outer','envelope','window','transparent','translucent','acrylic','plexiglass','lens_'].some(k => pn.includes(k));
-          
-          // Use a small alphaTest for textured transparency (like leaves or grilles)
-          if (mat.alphaMap) mat.alphaTest = 0.1;
-
-          // Stable transparency sorting
-          mat.depthWrite = settings.opacity > 0.85; // Keep depth write for high-opacity objects (including those with alpha maps) to prevent sorting glitched faces!
-          mesh.frustumCulled = false; 
-          
-          if (isShell) {
-            mat.side = THREE.FrontSide;
-            mesh.renderOrder = 5000; 
-            
-            if (!mesh.userData.backFaceMesh) {
-              const bMat = mat.clone();
-              bMat.side = THREE.BackSide;
-              bMat.depthWrite = false;
-              bMat.transparent = true;
-              const bMesh = new THREE.Mesh(mesh.geometry, bMat);
-              bMesh.frustumCulled = false;
-              bMesh.renderOrder = 4000; 
-              mesh.add(bMesh);
-              mesh.userData.backFaceMesh = bMesh;
-              mesh.userData.backFaceMat = bMat;
-            } else {
-              const bMat = mesh.userData.backFaceMat as THREE.MeshStandardMaterial;
-              const bMesh = mesh.userData.backFaceMesh as THREE.Mesh;
-              bMat.color.copy(mat.color);
-              bMat.opacity = mat.opacity * 0.5; // Slightly dimmer backface
-              bMat.side = THREE.BackSide;
-              bMat.depthWrite = false;
-              bMat.transparent = true;
-              bMesh.renderOrder = 4000;
-              bMat.needsUpdate = true;
-            }
-          } else {
-            mat.side = THREE.DoubleSide;
-            mesh.renderOrder = isInner ? 1000 : 2000; 
-            if (mesh.userData.backFaceMesh) {
-              mesh.remove(mesh.userData.backFaceMesh);
-              delete mesh.userData.backFaceMesh;
-              delete mesh.userData.backFaceMat;
-            }
-          }
-        } else {
-          mat.transparent = false;
-          mat.depthWrite = true;
-          mat.side = THREE.DoubleSide;
-          mesh.renderOrder = 0; 
-          mesh.frustumCulled = false; 
-          if (mesh.userData.backFaceMesh) {
-            mesh.remove(mesh.userData.backFaceMesh);
-            delete mesh.userData.backFaceMesh;
-            delete mesh.userData.backFaceMat;
-          }
-        }
-
-        mat.depthTest = true; 
-        mat.needsUpdate = true;
 
         // ── 13. Global tint & hover ────────────────────────────────────────
         if (settings.color !== '#ffffff') mat.color.set(settings.color);
@@ -1433,18 +1843,18 @@ const FBXModel: React.FC<FBXModelProps> = ({
           
           const targetId = hoveredPartId || activePartId;
           const targetLower = targetId.toLowerCase().trim();
-          const meshNameLower = mesh.name.toLowerCase().trim();
+          const currentMeshNameLower = mesh.name.toLowerCase().trim();
           
           // 1. DIRECT NAME MATCH (Most common for hover via name/key)
-          if (meshNameLower === targetLower || meshNameLower.includes(targetLower)) return true;
+          if (currentMeshNameLower === targetLower || currentMeshNameLower.includes(targetLower)) return true;
           
           // 2. SEMANTIC MATCH (Via part ID)
           const partById = modelParts.find(p => p.id === targetId);
           if (partById) {
             const pName = partById.partName.toLowerCase().trim();
             const pKey = (partById.partKey || "").toLowerCase().trim();
-            return meshNameLower === pName || meshNameLower.includes(pName) || 
-                   (pKey && (meshNameLower === pKey || meshNameLower.includes(pKey)));
+            return currentMeshNameLower === pName || currentMeshNameLower.includes(pName) || 
+                   (pKey && (currentMeshNameLower === pKey || currentMeshNameLower.includes(pKey)));
           }
           
           // 3. Fallback to material name match
@@ -1466,6 +1876,76 @@ const FBXModel: React.FC<FBXModelProps> = ({
       });
     });
   }, [fbx, settings, textureSets, textureCache, activePartId, hoveredPartId, modelParts]);
+
+
+
+  // ── Generic alpha-overlap resolver ────────────────────────────────────────
+  //
+  // Some FBX exports contain an opaque duplicate/cover mesh directly on top of
+  // a mesh that correctly uses the opacity atlas. In that case Three.js alpha
+  // works, but the opaque cover still visually blocks what is behind it.
+  //
+  // Resolve this automatically from material state + geometry overlap, without
+  // any model/mesh-name hardcoding.
+  useEffect(() => {
+    if (!fbx) return;
+
+    const meshes: THREE.Mesh[] = [];
+
+    fbx.updateMatrixWorld(true);
+
+    fbx.traverse((child) => {
+      if (!(child as THREE.Mesh).isMesh) return;
+
+      const mesh = child as THREE.Mesh;
+
+      // Only undo visibility changes made by THIS automatic resolver.
+      // Do not override visibility controlled by product/model-part settings.
+      if (mesh.userData.__autoHiddenByAlphaOverlap === true) {
+        mesh.visible = true;
+        mesh.userData.__autoHiddenByAlphaOverlap = false;
+      }
+
+      meshes.push(mesh);
+    });
+
+    const transparentMeshes = meshes.filter(meshHasRealAlphaMaterial);
+    const opaqueMeshes = meshes.filter(meshIsOpaqueForAlpha);
+
+    const hidden = new Set<THREE.Mesh>();
+
+    for (const transparentMesh of transparentMeshes) {
+      for (const opaqueMesh of opaqueMeshes) {
+        if (hidden.has(opaqueMesh)) continue;
+
+        if (
+          !areLikelyAlphaOccludingDuplicates(
+            transparentMesh,
+            opaqueMesh
+          )
+        ) {
+          continue;
+        }
+
+        opaqueMesh.visible = false;
+        opaqueMesh.userData.__autoHiddenByAlphaOverlap = true;
+        hidden.add(opaqueMesh);
+
+        console.log('[AUTO ALPHA OVERLAP] Hiding opaque duplicate', {
+          transparentMesh: transparentMesh.name,
+          hiddenOpaqueMesh: opaqueMesh.name,
+          material: getMaterialNames(transparentMesh),
+        });
+      }
+    }
+  }, [
+    fbx,
+    textureCache,
+    textureSets,
+    settings.alphaMappings,
+    settings.materialMappings,
+    settings.flipY
+  ]);
 
   // ── Pre-process: center, scale, extract material names ───────────────────
   const [materialNames, setMaterialNames] = useState<string[]>([]);
@@ -1491,24 +1971,47 @@ const FBXModel: React.FC<FBXModelProps> = ({
         if (!mesh.name || mesh.name.trim() === '') mesh.name = `Part_${meshCounter++}`;
         if (!mshNames.includes(mesh.name)) mshNames.push(mesh.name);
         
-        const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-        if (mat) {
-          if (!mat.name) mat.name = `Material_${matNames.length}`;
-          if (!matNames.includes(mat.name)) matNames.push(mat.name);
-          const sm = (mat instanceof THREE.MeshStandardMaterial) ? mat : (() => {
-            const s = new THREE.MeshStandardMaterial();
-            s.name = mat.name;
-            if ((mat as any).color) s.color.copy((mat as any).color);
-            if ((mat as any).map) s.map = (mat as any).map;
-            if ((mat as any).normalMap) s.normalMap = (mat as any).normalMap;
-            if ((mat as any).opacity !== undefined) s.opacity = (mat as any).opacity;
-            if ((mat as any).transparent !== undefined) s.transparent = (mat as any).transparent;
-            if (Array.isArray(mesh.material)) mesh.material[0] = s; else mesh.material = s;
-            return s;
-          })();
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const processedMaterials = materials.map((mat, index) => {
+          if (!mat) return mat;
+          if (!mat.name || mat.name.trim() === '') {
+            mat.name = `Material_${matNames.length}_${index}`;
+          }
+          if (!matNames.includes(mat.name)) {
+            matNames.push(mat.name);
+          }
+          // Always isolate the material per mesh. FBX files frequently reuse the
+          // same material object across many meshes. Alpha state is mesh-specific,
+          // so sharing one material instance would let one mesh overwrite another.
+          const sm = (mat instanceof THREE.MeshStandardMaterial)
+            ? mat.clone()
+            : (() => {
+                const s = new THREE.MeshStandardMaterial();
+                s.name = mat.name;
+                if ((mat as any).color) s.color.copy((mat as any).color);
+                if ((mat as any).map) s.map = (mat as any).map;
+                if ((mat as any).normalMap) s.normalMap = (mat as any).normalMap;
+                if ((mat as any).roughnessMap) s.roughnessMap = (mat as any).roughnessMap;
+                if ((mat as any).metalnessMap) s.metalnessMap = (mat as any).metalnessMap;
+                if ((mat as any).alphaMap) s.alphaMap = (mat as any).alphaMap;
+                if ((mat as any).opacity !== undefined) s.opacity = (mat as any).opacity;
+                return s;
+              })();
+
+          sm.name = mat.name;
+          sm.userData = { ...mat.userData };
           sm.userData.isPBR = true;
           if (!sm.userData.originalMap) sm.userData.originalMap = sm.map;
           if (!sm.userData.originalColor) sm.userData.originalColor = sm.color.clone();
+          if (sm.userData.originalOpacity === undefined) sm.userData.originalOpacity = sm.opacity;
+          if (sm.userData.originalTransparent === undefined) sm.userData.originalTransparent = sm.transparent;
+          return sm;
+        });
+
+        if (Array.isArray(mesh.material)) {
+          mesh.material = processedMaterials;
+        } else {
+          mesh.material = processedMaterials[0];
         }
         initialPositions.current.set(child, child.position.clone());
         const wp = new THREE.Vector3(); child.getWorldPosition(wp);
@@ -1672,35 +2175,12 @@ const FBXModel: React.FC<FBXModelProps> = ({
   useEffect(() => {
     return () => {
       if (fbx) {
-        console.log("[FBXModel] 🧹 Unmount / Change cleanup: Disposing instanced model materials and backface passes...");
+        console.log("[FBXModel] 🧹 Unmount / Change cleanup: Disposing instanced model materials...");
         fbx.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             const mesh = child as THREE.Mesh;
             
-            // Dispose backface pass materials and meshes
-            if (mesh.userData?.backFaceMesh) {
-              const bMesh = mesh.userData.backFaceMesh as THREE.Mesh;
-              if (bMesh.geometry) {
-                try { bMesh.geometry.dispose(); } catch (err) { console.warn("Error disposing backFace geometry:", err); }
-              }
-              if (bMesh.material) {
-                const bMats = Array.isArray(bMesh.material) ? bMesh.material : [bMesh.material];
-                bMats.forEach((m) => {
-                  if (m && typeof m.dispose === "function") {
-                    try { m.dispose(); } catch (err) { console.warn("Error disposing backFace Material:", err); }
-                  }
-                });
-              }
-              try { mesh.remove(bMesh); } catch(e) {}
-            }
-            if (mesh.userData?.backFaceMat) {
-              const bMat = mesh.userData.backFaceMat;
-              if (bMat && typeof bMat.dispose === "function") {
-                try { bMat.dispose(); } catch (err) { console.warn("Error disposing backFaceMat userData:", err); }
-              }
-            }
-            
-            // Dispose normal materials assigned to the mesh
+            // Dispose materials assigned to the mesh
             if (mesh.material) {
               const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
               mats.forEach((mat) => {
@@ -1733,8 +2213,7 @@ const FBXModel: React.FC<FBXModelProps> = ({
 
   return (
     <group ref={outerGroupRef}>
-      <primitive key={url} object={fbx} />
-      {hotspots.map((hs) => (
+<primitive key={url} object={fbx} />      {hotspots.map((hs) => (
         <group key={hs.id} position={hs.anchorPosition}>
           <Html distanceFactor={15}>
             <div className="relative">
