@@ -17,6 +17,7 @@ export interface Translations {
   resetView: string;
   playAnimation: string;
   stopAnimation: string;
+  reverseAnimation: string;
   productsCatalog: string;
   settings: string;
   initializing: string;
@@ -66,6 +67,7 @@ export const translations: Record<Language, Translations> = {
     resetView: "Reset View",
     playAnimation: "Play Animation",
     stopAnimation: "Stop Animation",
+    reverseAnimation: "Reverse Animation",
     productsCatalog: "Products Catalog",
     settings: "Settings",
     initializing: "Initializing...",
@@ -113,6 +115,7 @@ export const translations: Record<Language, Translations> = {
     resetView: "איפוס מבט",
     playAnimation: "הפעל אנימציה",
     stopAnimation: "עצור אנימציה",
+    reverseAnimation: "אנימציה אחורה",
     productsCatalog: "קטלוג מוצרים",
     settings: "הגדרות",
     initializing: "מאתחל...",
@@ -160,6 +163,7 @@ export const translations: Record<Language, Translations> = {
     resetView: "إعادة ضبط العرض",
     playAnimation: "تشغيل الرسوم المتحركة",
     stopAnimation: "إيقاف الرسوم المتحركة",
+    reverseAnimation: "عكس الرسوم المتحركة",
     productsCatalog: "كتالوج المنتجات",
     settings: "الإعدادات",
     initializing: "جاري التهيئة...",
@@ -207,6 +211,7 @@ export const translations: Record<Language, Translations> = {
     resetView: "Сбросить вид",
     playAnimation: "Запустить анимацию",
     stopAnimation: "Остановить анимацию",
+    reverseAnimation: "Анимация назад",
     productsCatalog: "Каталог товаров",
     settings: "Настройки",
     initializing: "Инициализация...",
