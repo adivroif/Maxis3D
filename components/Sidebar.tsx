@@ -971,7 +971,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="flex flex-col justify-between flex-1 mt-2 min-h-0">
               <div className="flex flex-col gap-0.5 shrink-0">
                 <div className={`flex items-center justify-between ${isRTL ? 'flex-row-reverse' : ''}`}>
-                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-yellow-600 dark:text-yellow-500 leading-none">
+                  <span className="text-xs sm:text-sm font-black uppercase tracking-[0.1em] text-yellow-600 dark:text-yellow-500 leading-none">
                     {t.productInfo}
                   </span>
                   {hoveredProduct.price !== undefined && (
