@@ -84,13 +84,11 @@ const speakNative = (text: string, langCode: string) => {
     if (voice) utterance.voice = voice;
   }
 
-  // Adjust speaking rate to be slower and clearer for foreign languages
+  // Adjust speaking rate - faster for Hebrew, standard 1.0 for all other languages
   if (langCode === 'he') {
-    utterance.rate = 0.70; // Slow down Hebrew to exactly 0.70
-  } else if (langCode === 'ar' || langCode === 'ru') {
-    utterance.rate = 0.78; // Slightly slower for better pronunciation clarity
+    utterance.rate = 1.18; // Faster speech rate for Hebrew
   } else {
-    utterance.rate = 1.0;  // Standard speed for English
+    utterance.rate = 1.0;  // Standard normal speed for all other languages
   }
   
   utterance.pitch = 1.0;
@@ -187,13 +185,11 @@ export const playAudioBuffer = (buffer: AudioBuffer, langCode?: string): Promise
     const source = ctx.createBufferSource();
     source.buffer = buffer;
 
-    // Slow down playback rate specifically for Hebrew & other languages to improve comfort & comprehension
+    // Faster speed only for Hebrew, normal 1.0 for all other languages
     if (langCode === 'he') {
-      source.playbackRate.value = 0.70; // 30% slower for natural, clear, relaxed Hebrew speech (0.7 rate)
-    } else if (langCode === 'ar' || langCode === 'ru') {
-      source.playbackRate.value = 0.78; // 22% slower for comfortable Arabic & Russian speech
+      source.playbackRate.value = 1.18;
     } else {
-      source.playbackRate.value = 1.0;  // Normal speed
+      source.playbackRate.value = 1.0;
     }
 
     source.connect(ctx.destination);
@@ -274,18 +270,40 @@ const isAlreadyInLanguage = (text: string, langCode: string): boolean => {
 };
 
 const cleanTranslationTextClient = (txt: string): string => {
-  return txt
+  if (!txt) return '';
+  let cleaned = txt
+    .replace(/<br\s*\/?>/gi, '. ')
+    .replace(/<\/p>/gi, '. ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&');
+
+  return cleaned
     .replace(/^(translation|translated text|hebrew|arabic|russian|english|עברית|ערבית|רוסית|אנגלית):\s*/i, '')
     .replace(/^["'“”]|["'“”]$/g, '') // Remove quotes including smart quotes
     .replace(/\*\*+/g, "") // Remove bold markdown symbols
     .replace(/__+/g, "")
     .replace(/`+/g, "")
     .replace(/\[[^\]]*\]/g, "") // Remove brackets with text inside (e.g. [Mesh], [Object])
-    .replace(/נ"צ מוצר/g, "מק\"ט")
-    .replace(/נ"צ/g, "מק\"ט")
-    // Replace colons, semicolons, and dashes representing labels/separators with a full stop and space to force a beautiful pause between sections
-    .replace(/:/g, ".  ")
-    .replace(/;/g, ".  ")
+    .replace(/שם\s*החלק\s*:\s*/gi, '')
+    .replace(/תיאור\s*החלק\s*:\s*/gi, '')
+    .replace(/שם\s*המוצר\s*:\s*/gi, '')
+    .replace(/תיאור\s*המוצר\s*:\s*/gi, '')
+    .replace(/\bנ"צ\s*מוצר\b/gi, 'מַקָ״ט')
+    .replace(/\bנ"צ\b/gi, 'מַקָ״ט')
+    .replace(/\bמק"ט\b/gi, 'מַקָ״ט')
+    .replace(/\bמק״ט\b/gi, 'מַקָ״ט')
+    .replace(/\bמק'ט\b/gi, 'מַקָ״ט')
+    .replace(/(\d+)\s*[xX×]\s*(\d+)/g, '$1 על $2')
+    .replace(/\bמ"מ\b/gi, 'מילימטר')
+    .replace(/\bמ״מ\b/gi, 'מילימטר')
+    .replace(/\bס"מ\b/gi, 'סנטימטר')
+    .replace(/\bס״מ\b/gi, 'סנטימטר')
+    .replace(/\bק"ג\b/gi, 'קילוגרם')
+    .replace(/\bק״ג\b/gi, 'קילוגרם')
+    .replace(/\bמ'\b/gi, 'מטרים')
+    .replace(/\s*:\s*/g, ", ")
+    .replace(/\s*;\s*/g, ", ")
     .replace(/\s*[\/\\]\s*/g, ",  ") // Clean slashes with spacious commas
     .replace(/[#*•\-_]+/g, " ") // Clean weird marks
     // Keep pauses when reading lists or categories
@@ -428,11 +446,16 @@ export const speakText = async (text: string, targetLanguage: string = 'en'): Pr
     // Play the full block to preserve elegant speech patterns and avoid choppy silence gaps
     try {
       const buffer = await generateAudioBuffer(cleanedTextForSpeech, langCode);
-      if (sessionId === activeSpeechSessionId && buffer) {
-        await playAudioBuffer(buffer, langCode);
+      if (sessionId === activeSpeechSessionId) {
+        if (buffer) {
+          await playAudioBuffer(buffer, langCode);
+        } else {
+          console.warn("[TTS] Server buffer empty, falling back to native browser speech");
+          speakNative(cleanedTextForSpeech, langCode);
+        }
       }
     } catch (err) {
-      console.error("[TTS] ElevenLabs audio failed, falling back to instant native speech as last resort", err);
+      console.error("[TTS] Server audio failed, falling back to instant native speech as last resort", err);
       if (sessionId === activeSpeechSessionId) {
         speakNative(cleanedTextForSpeech, langCode);
       }
@@ -454,11 +477,16 @@ export const speakText = async (text: string, targetLanguage: string = 'en'): Pr
 
     try {
       const buffer = await generateAudioBuffer(cleanedTextForSpeech, langCode);
-      if (sessionId === activeSpeechSessionId && buffer) {
-        await playAudioBuffer(buffer, langCode);
+      if (sessionId === activeSpeechSessionId) {
+        if (buffer) {
+          await playAudioBuffer(buffer, langCode);
+        } else {
+          console.warn("[TTS] Server buffer empty after translation, falling back to native browser speech");
+          speakNative(cleanedTextForSpeech, langCode);
+        }
       }
     } catch (err) {
-      console.error("[TTS] ElevenLabs audio failed after translation, falling back to instant native speech as last resort", err);
+      console.error("[TTS] Server audio failed after translation, falling back to instant native speech as last resort", err);
       if (sessionId === activeSpeechSessionId) {
         speakNative(cleanedTextForSpeech, langCode);
       }
