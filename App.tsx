@@ -2555,7 +2555,7 @@ const App: React.FC = () => {
                     }}
                   >
                     <div className="flex items-center gap-2">
-                      <span className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.2em]'} text-yellow-600 leading-none mb-1`}>{t.productInfo}</span>
+                      <span className={`text-xs sm:text-sm font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.1em]'} text-yellow-600 dark:text-yellow-500 leading-none mb-1.5`}>{t.productInfo}</span>
                       {productDetails?.linkTo && (
                         <svg className={`w-2.5 h-2.5 text-yellow-600 opacity-0 group-hover/title:opacity-100 transition-opacity mb-1 ${isRTL ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -2851,7 +2851,7 @@ const App: React.FC = () => {
                                             </div>
                                           </div>
 
-                                          {/* Details layout */}
+                                           {/* Details layout */}
                                           <div className="flex-1 space-y-2 min-w-0">
                                             <div className="flex items-start gap-2 min-w-0 w-full">
                                               <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
@@ -2862,12 +2862,12 @@ const App: React.FC = () => {
                                               </span>
                                             </div>
 
-                                            <div className="flex flex-col gap-0.5">
-                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                            <div className="flex items-start gap-2 min-w-0 w-full">
+                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
                                                 {t.labelPartDescription}:
                                               </span>
                                               <div 
-                                                className={`text-[11px] leading-snug line-clamp-none whitespace-normal break-words ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
+                                                className={`text-[11px] leading-snug line-clamp-none whitespace-normal break-words min-w-0 flex-1 ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
                                                 dangerouslySetInnerHTML={{ __html: description }}
                                               />
                                             </div>
@@ -2940,12 +2940,12 @@ const App: React.FC = () => {
                                               </span>
                                             </div>
 
-                                            <div className="flex flex-col gap-0.5">
-                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                            <div className="flex items-start gap-2 min-w-0 w-full">
+                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
                                                 {t.labelPartDescription}:
                                               </span>
                                               <div 
-                                                className={`text-[11px] leading-snug line-clamp-none whitespace-normal break-words ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
+                                                className={`text-[11px] leading-snug line-clamp-none whitespace-normal break-words min-w-0 flex-1 ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
                                                 dangerouslySetInnerHTML={{ __html: description }}
                                               />
                                             </div>
