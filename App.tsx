@@ -247,7 +247,7 @@ const App: React.FC = () => {
   const [isProductInfoOpen, setIsProductInfoOpen] = useState(false);
   const [orbitDirection, setOrbitDirection] = useState<'up' | 'down' | 'left' | 'right' | null>(null);
   const [isFetchingDetails, setIsFetchingDetails] = useState(false);
-  const [language, setLanguage] = useState<Language>('en');
+  const [language, setLanguage] = useState<Language>('he');
   const [productDetails, setProductDetails] = useState<{ 
     productId?: string,
     title: string, 
@@ -330,6 +330,12 @@ const App: React.FC = () => {
       document.documentElement.classList.remove('dark');
     }
   }, [isNightMode]);
+
+  // Sync language and text direction with document.documentElement
+  useEffect(() => {
+    document.documentElement.setAttribute('lang', language);
+    document.documentElement.setAttribute('dir', language === 'he' || language === 'ar' ? 'rtl' : 'ltr');
+  }, [language]);
 
   // Keyboard orbit controls
   useEffect(() => {
@@ -416,12 +422,12 @@ const App: React.FC = () => {
     const modelNameBase = selectedModel.name.replace(/\.fbx$/i, '');
     const normalizedName = modelNameBase.trim().toLowerCase();
     
-    // 1. If user language is Hebrew, prefer the pre-fetched display title directly if available (since it's already in Hebrew)
-    if (language === 'he' && productDisplayTitles[normalizedName]) {
-      return productDisplayTitles[normalizedName];
+    // 1. If we have active translated productDetails title, use that directly
+    if (productDetails?.title) {
+      return productDetails.title;
     }
-    
-    // 2. If we have a fully translated selected model name, use that (handles English/Arabic/Russian/etc. gracefully)
+
+    // 2. If we have a translated selected model name, use that
     if (translatedSelectedModelName) {
       return translatedSelectedModelName;
     }
@@ -433,7 +439,7 @@ const App: React.FC = () => {
     
     // 4. Ultimate fallback to clean file name
     return modelNameBase.replace(/_/g, ' ').replace(/-/g, ' ');
-  }, [selectedModel, translatedSelectedModelName, productDisplayTitles, language]);
+  }, [selectedModel, productDetails?.title, translatedSelectedModelName, productDisplayTitles, language]);
 
   useEffect(() => {
     if (selectedModel?.url) {
@@ -823,10 +829,7 @@ const App: React.FC = () => {
     const originalDisplayName = selectedModel.name;
     const cleanFileName = originalDisplayName.replace(/_/g, ' ').replace(/-/g, ' ');
     const displayTitle = productDetails?.originalTitle || productDisplayTitles[originalDisplayName.replace(/\.fbx$/i, '').trim().toLowerCase()] || cleanFileName;
-    if (langName === 'English') {
-      setTranslatedSelectedModelName(displayTitle);
-      return;
-    }
+    
     const translateName = async () => {
       const translated = await translateText(displayTitle, langName);
       setTranslatedSelectedModelName(translated);
@@ -1295,7 +1298,7 @@ const App: React.FC = () => {
       if (allTextures.length === 0) return;
 
       const filteredTextures = allTextures.filter((tex: any) => !tex.name.toLowerCase().includes('preview'));
-      const colorNames = ['red', 'blue', 'green', 'yellow', 'black', 'white', 'orange', 'purple', 'pink', 'gray', 'grey', 'gold', 'silver', 'brown', 'lite', 'dark'];
+      const colorNames = ['red', 'blue', 'green', 'yellow', 'black', 'white', 'orange', 'purple', 'pink', 'light', 'dark', 'gray', 'grey', 'gold', 'silver', 'brown', 'lite'];
 
       setModels(prev => prev.map(model => {
         if (model.id !== modelId) return model;
@@ -1845,28 +1848,184 @@ const App: React.FC = () => {
   }, []);
 
   const getColorFromName = (name: string) => {
-    const n = name.toLowerCase();
-    if (n.includes('red')) return '#ef4444';
-    if (n.includes('blue')) return '#3b82f6';
-    if (n.includes('green')) return '#22c55e';
-    if (n.includes('yellow')) return '#eab308';
-    if (n.includes('black')) return '#18181b';
-    if (n.includes('white')) return '#ffffff';
-    if (n.includes('orange')) return '#f97316';
-    if (n.includes('purple')) return '#a855f7';
-    if (n.includes('pink')) return '#ec4899';
-    if (n.includes('gray') || n.includes('grey')) return '#71717a';
-    if (n.includes('gold')) return '#eab308';
-    if (n.includes('silver')) return '#d4d4d8';
-    
-    // If it's a number, generate a distinct color
+    if (!name) return '#a1a1aa';
+    const n = name.toLowerCase().trim();
+
+    const isLight = /\b(light|lite)\b/i.test(n) || n.includes('light') || n.includes('lite') || n.includes('בהיר');
+    const isDark = /\b(dark|black|charcoal|anthracite|ebony|night|shadow)\b/i.test(n) || n.includes('dark') || n.includes('כהה');
+
+    // 1. White / Off-white / Cream
+    if (/\b(white|offwhite|off-white|cream|ivory|snow)\b/i.test(n) || n === 'white' || n.includes('white') || n.includes('לבן')) {
+      return '#ffffff';
+    }
+
+    // 2. Black
+    if (/\b(black|ebony|charcoal|anthracite)\b/i.test(n) || n === 'black' || n.includes('black') || n.includes('שחור')) {
+      return '#18181b';
+    }
+
+    // 3. Gray / Grey / Silver
+    if (n.includes('gray') || n.includes('grey') || n.includes('silver') || n.includes('platinum') || n.includes('אפור')) {
+      if (isDark) return '#383838';
+      if (isLight) return '#d8d8d8';
+      return '#808080';
+    }
+
+    // 4. Brown / Wood / Oak / Walnut / Beech
+    if (n.includes('brown') || n.includes('wood') || n.includes('oak') || n.includes('walnut') || n.includes('beech') || n.includes('teak') || n.includes('mahogany') || n.includes('חום') || n.includes('עץ')) {
+      if (isLight) return '#c48b52'; // Light warm brown / wood
+      if (isDark) return '#451a03';  // Dark espresso brown
+      return '#78350f';             // Medium brown
+    }
+
+    // 5. Beige / Sand / Tan / Khaki
+    if (n.includes('beige') || n.includes('sand') || n.includes('tan') || n.includes('khaki')) {
+      return '#e7d8c9';
+    }
+
+    // 6. Red / Rose / Crimson
+    if (n.includes('red') || n.includes('rose') || n.includes('crimson') || n.includes('אדום')) {
+      if (isLight) return '#fca5a5';
+      if (isDark) return '#7f1d1d';
+      return '#ef4444';
+    }
+
+    // 7. Blue / Navy / Azure
+    if (n.includes('blue') || n.includes('navy') || n.includes('azure') || n.includes('כחול')) {
+      if (isLight) return '#93c5fd';
+      if (isDark) return '#1e3a8a';
+      return '#3b82f6';
+    }
+
+    // 8. Green / Lime / Emerald
+    if (n.includes('green') || n.includes('lime') || n.includes('emerald') || n.includes('ירוק')) {
+      if (isLight) return '#86efac';
+      if (isDark) return '#14532d';
+      return '#22c55e';
+    }
+
+    // 9. Yellow / Gold
+    if (n.includes('yellow') || n.includes('gold') || n.includes('צהוב') || n.includes('זהב')) {
+      return '#eab308';
+    }
+
+    // 10. Orange
+    if (n.includes('orange') || n.includes('כתום')) {
+      return '#f97316';
+    }
+
+    // 11. Purple / Violet
+    if (n.includes('purple') || n.includes('violet') || n.includes('סגול')) {
+      return '#a855f7';
+    }
+
+    // 12. Pink / Magenta
+    if (n.includes('pink') || n.includes('magenta') || n.includes('ורוד')) {
+      return '#ec4899';
+    }
+
+    // 13. General dark / light fallback if no color keyword matched
+    if (isDark) return '#383838';
+    if (isLight) return '#d8d8d8';
+
+    // 14. If it's a number, pick from subtle colors
     const num = parseInt(name);
     if (!isNaN(num)) {
-      const colors = ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7', '#f97316', '#ec4899', '#06b6d4', '#8b5cf6', '#10b981', '#f43f5e', '#6366f1'];
+      const colors = ['#383838', '#d8d8d8', '#ffffff', '#18181b', '#808080', '#a16207', '#3b82f6', '#22c55e', '#ef4444', '#eab308'];
       return colors[num % colors.length];
     }
-    
-    return '#facc15'; // Default yellow
+
+    return '#a1a1aa'; // Default neutral gray
+  };
+
+  const getVariantDisplayName = (name: string, lang: Language) => {
+    if (!name) return '';
+    if (lang === 'en') return name;
+
+    const n = name.toLowerCase().trim();
+
+    if (lang === 'he') {
+      if (n === 'blue') return 'כחול';
+      if (n === 'red') return 'אדום';
+      if (n === 'white') return 'לבן';
+      if (n === 'black') return 'שחור';
+      if (n === 'green') return 'ירוק';
+      if (n === 'yellow') return 'צהוב';
+      if (n === 'orange') return 'כתום';
+      if (n === 'purple') return 'סגול';
+      if (n === 'pink') return 'ורוד';
+      if (n === 'gray' || n === 'grey') return 'אפור';
+      if (n === 'dark gray' || n === 'dark grey' || n === 'dark_gray' || n === 'dark_grey') return 'אפור כהה';
+      if (n === 'light gray' || n === 'light grey' || n === 'light_gray' || n === 'light_grey') return 'אפור בהיר';
+      if (n === 'brown') return 'חום';
+      if (n === 'brown lite' || n === 'light brown' || n === 'brown_lite') return 'חום בהיר';
+      if (n === 'dark brown' || n === 'brown dark') return 'חום כהה';
+      if (n === 'gold') return 'זהב';
+      if (n === 'silver') return 'כסף';
+      if (n === 'wood' || n === 'oak') return 'עץ';
+      if (n === 'walnut') return 'אגוז';
+
+      let translated = name;
+      if (/\b(dark)\b/i.test(translated) && /\b(gray|grey)\b/i.test(translated)) return 'אפור כהה';
+      if (/\b(light|lite)\b/i.test(translated) && /\b(gray|grey)\b/i.test(translated)) return 'אפור בהיר';
+      if (/\b(brown)\b/i.test(translated) && /\b(light|lite)\b/i.test(translated)) return 'חום בהיר';
+      if (/\b(dark)\b/i.test(translated) && /\b(brown)\b/i.test(translated)) return 'חום כהה';
+      if (/\b(dark)\b/i.test(translated) && /\b(blue)\b/i.test(translated)) return 'כחול כהה';
+      if (/\b(light|lite)\b/i.test(translated) && /\b(blue)\b/i.test(translated)) return 'כחול בהיר';
+      if (/\b(dark)\b/i.test(translated) && /\b(green)\b/i.test(translated)) return 'ירוק כהה';
+      if (/\b(light|lite)\b/i.test(translated) && /\b(green)\b/i.test(translated)) return 'ירוק בהיר';
+
+      translated = translated
+        .replace(/\bwhite\b/gi, 'לבן')
+        .replace(/\bblack\b/gi, 'שחור')
+        .replace(/\bblue\b/gi, 'כחול')
+        .replace(/\bred\b/gi, 'אדום')
+        .replace(/\bgreen\b/gi, 'ירוק')
+        .replace(/\byellow\b/gi, 'צהוב')
+        .replace(/\borange\b/gi, 'כתום')
+        .replace(/\bpurple\b/gi, 'סגול')
+        .replace(/\bpink\b/gi, 'ורוד')
+        .replace(/\bgray\b/gi, 'אפור')
+        .replace(/\bgrey\b/gi, 'אפור')
+        .replace(/\bbrown\b/gi, 'חום')
+        .replace(/\bgold\b/gi, 'זהב')
+        .replace(/\bsilver\b/gi, 'כסף')
+        .replace(/\blite\b/gi, 'בהיר')
+        .replace(/\blight\b/gi, 'בהיר')
+        .replace(/\bdark\b/gi, 'כהה');
+
+      return translated;
+    }
+
+    if (lang === 'ar') {
+      if (n === 'blue') return 'أزرق';
+      if (n === 'red') return 'أحمر';
+      if (n === 'white') return 'أبيض';
+      if (n === 'black') return 'أسود';
+      if (n === 'green') return 'أخضر';
+      if (n === 'yellow') return 'أصفر';
+      if (n === 'brown') return 'بني';
+      if (n === 'brown lite' || n === 'light brown') return 'بني فاتح';
+      if (n === 'gray' || n === 'grey') return 'رمادي';
+      if (n === 'dark gray' || n === 'dark grey') return 'رمادي داكن';
+      if (n === 'light gray' || n === 'light grey') return 'رمادي فاتح';
+    }
+
+    if (lang === 'ru') {
+      if (n === 'blue') return 'Синий';
+      if (n === 'red') return 'Красный';
+      if (n === 'white') return 'Белый';
+      if (n === 'black') return 'Черный';
+      if (n === 'green') return 'Зеленый';
+      if (n === 'yellow') return 'Желтый';
+      if (n === 'brown') return 'Коричневый';
+      if (n === 'brown lite' || n === 'light brown') return 'Светло-коричневый';
+      if (n === 'gray' || n === 'grey') return 'Серый';
+      if (n === 'dark gray' || n === 'dark grey') return 'Темно-серый';
+      if (n === 'light gray' || n === 'light grey') return 'Светло-серый';
+    }
+
+    return name;
   };
 
   const handleToggleAnimation = () => {
@@ -1973,7 +2132,7 @@ const App: React.FC = () => {
           href="https://fbxstudio.co.il/" 
           target="_blank" 
           rel="noopener noreferrer"
-          className="w-12 h-12 sm:w-16 sm:h-16 bg-white/80 backdrop-blur-xl rounded-xl sm:rounded-2xl border border-black/5 shadow-2xl overflow-hidden flex items-center justify-center pointer-events-auto transition-transform hover:scale-105 active:scale-95"
+          className="w-12 h-12 sm:w-16 sm:h-16 bg-white/80 backdrop-blur-xl rounded-xl sm:rounded-2xl border border-black/5 shadow-2xl overflow-hidden flex items-center justify-center pointer-events-auto transition-transform hover:scale-105 active:scale-95 shrink-0"
         >
           <img 
             src="https://files.fbxstudio.co.il/images/wallpaper_customer_maxis_only_logo.png" 
@@ -1983,8 +2142,8 @@ const App: React.FC = () => {
           />
         </a>
         {selectedModel && (
-          <div className="animate-in fade-in slide-in-from-left-4 duration-500 pointer-events-auto flex flex-col gap-1 items-start text-left">
-            <div className={`text-xs sm:text-sm font-bold uppercase tracking-wider leading-tight break-words whitespace-normal line-clamp-2 max-w-[calc(100vw-200px)] sm:max-w-[350px] md:max-w-none ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
+          <div className="animate-in fade-in slide-in-from-left-4 duration-500 pointer-events-auto flex flex-col gap-1 items-start text-start">
+            <div className={`text-xs sm:text-sm font-bold uppercase tracking-wider leading-tight break-words whitespace-normal line-clamp-2 max-w-[calc(100vw-200px)] sm:max-w-[350px] md:max-w-none text-start ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
               {currentModelDisplayName}
             </div>
             <button
@@ -1998,7 +2157,7 @@ const App: React.FC = () => {
                 navigator.clipboard.writeText(shareUrl)
                   .then(() => {
                     setToast({
-                      message: language === 'he' ? 'הקישור הועתק ללוח!' : 'Link copied to clipboard!',
+                      message: language === 'he' ? 'הקישור הועתק ללוח!' : language === 'ar' ? 'تم نسخ الرابط!' : language === 'ru' ? 'Ссылка скопирована!' : 'Link copied to clipboard!',
                       type: 'success'
                     });
                   })
@@ -2015,7 +2174,9 @@ const App: React.FC = () => {
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
               </svg>
-              <span>{language === 'he' ? 'שתף מודל' : 'Share Model'}</span>
+              <span>
+                {language === 'he' ? 'שתף מודל' : language === 'ar' ? 'مشاركة النموذج' : language === 'ru' ? 'Поделиться' : 'Share Model'}
+              </span>
             </button>
           </div>
         )}
@@ -2127,10 +2288,10 @@ const App: React.FC = () => {
 
               {/* Language Code Selector */}
               <div className="flex flex-col gap-2">
-                <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 leading-none">
-                  {language === 'he' ? 'שפת ממשק' : 'Interface Language'}
+                <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-zinc-400 leading-none text-start">
+                  {language === 'he' ? 'שפת ממשק' : language === 'ar' ? 'لغة الواجهة' : language === 'ru' ? 'Язык интерфейса' : 'Interface Language'}
                 </span>
-                <div className="grid grid-cols-4 gap-1.5 bg-zinc-50/50 p-1 rounded-xl border border-black/5">
+                <div className="grid grid-cols-4 gap-1.5 bg-zinc-50/50 p-1 rounded-xl border border-black/5" dir="ltr">
                   {(['en', 'he', 'ar', 'ru'] as Language[]).map((lang) => (
                     <button
                       key={lang}
@@ -2301,7 +2462,7 @@ const App: React.FC = () => {
         {/* COLOR VARIANTS - BOTTOM CENTER */}
         {selectedModel && relevantVariants.length > 1 && (
           <div 
-            className="absolute left-1/2 -translate-x-1/2 z-[51] flex items-center gap-2 sm:gap-4 bg-white/80 backdrop-blur-2xl px-4 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
+            className="absolute left-1/2 -translate-x-1/2 z-[51] flex items-center gap-3 sm:gap-5 bg-white/80 backdrop-blur-2xl px-5 sm:px-8 py-3 sm:py-5 rounded-[2rem] sm:rounded-[3rem] border border-black/5 shadow-2xl animate-in slide-in-from-bottom-10 duration-1000 max-w-[90vw] overflow-x-auto no-scrollbar transition-all duration-500 ease-in-out"
             style={{ 
               bottom: isIPad 
                 ? (isCatalogCollapsed ? '96px' : '310px') 
@@ -2310,42 +2471,33 @@ const App: React.FC = () => {
                   : (isCatalogCollapsed ? '52px' : '282px'))
             }}
           >
-            <div className="flex flex-col mr-2 sm:mr-4 shrink-0">
-              <span className="text-[7px] sm:text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400 leading-none mb-1">
+            <div className="flex flex-col shrink-0 text-start">
+              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400 leading-none mb-1">
                 {activePart ? activePart.name : t.variant}
               </span>
-              <span className="text-[10px] sm:text-[12px] font-black text-zinc-800 uppercase tracking-tight whitespace-normal break-words max-w-[75px] sm:max-w-none leading-tight">
-                {selectedModel.settings.activeVariant || t.default}
+              <span className="text-[10px] sm:text-[12px] font-black text-zinc-800 uppercase tracking-tight whitespace-normal break-words max-w-[85px] sm:max-w-none leading-tight">
+                {getVariantDisplayName(selectedModel.settings.activeVariant || t.default, language)}
               </span>
             </div>
-            <div className="h-6 sm:h-8 w-[1px] bg-black/5 mr-1 sm:mr-2 shrink-0"></div>
+            <div className="h-6 sm:h-8 w-[1px] bg-black/5 shrink-0"></div>
             <div className="flex items-center gap-2 sm:gap-3">
               {relevantVariants.map((variant) => (
                 <button
                   key={variant.name}
                   onClick={() => handleSwitchVariant(variant.name)}
-                  className={`group relative w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-all duration-500 shrink-0 ${
+                  className={`group relative w-8 h-8 sm:w-10 sm:h-10 rounded-full transition-all duration-300 shrink-0 ${
                     selectedModel.settings.activeVariant === variant.name 
-                    ? 'scale-110 sm:scale-125 shadow-xl ring-4 ring-yellow-500/20' 
-                    : 'hover:scale-110'
+                    ? 'scale-110 sm:scale-125 shadow-lg ring-4 ring-yellow-500' 
+                    : 'hover:scale-110 shadow-md'
                   }`}
-                  title={variant.name}
+                  title={getVariantDisplayName(variant.name, language)}
                 >
                   <div 
-                    className="absolute inset-0 rounded-full border-2 border-white shadow-inner overflow-hidden"
+                    className="absolute inset-0 rounded-full border-2 border-zinc-300 dark:border-zinc-600 shadow-inner overflow-hidden"
                     style={{ backgroundColor: getColorFromName(variant.name) }}
-                  >
-                    {activeMaterialName && variant.mappings[activeMaterialName] && (
-                      <img 
-                        src={variant.mappings[activeMaterialName]} 
-                        className="w-full h-full object-cover" 
-                        referrerPolicy="no-referrer"
-                        alt={variant.name}
-                      />
-                    )}
-                  </div>
+                  />
                   {selectedModel.settings.activeVariant === variant.name && (
-                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-yellow-500 rounded-full"></div>
+                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-yellow-500 rounded-full ring-2 ring-white dark:ring-zinc-900"></div>
                   )}
                 </button>
               ))}
