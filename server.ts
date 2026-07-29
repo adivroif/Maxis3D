@@ -1212,25 +1212,42 @@ async function startServer() {
   async function handleGetFileResiliently(folder: string, fileName: string, clientName: string, res: any) {
     const activeClient = clientName || "tenantA";
     
+    // Always search in 'images' folder for any image extension to prevent searching under 'tenants'
+    let effectiveFolder = folder;
+    const lowerFileName = (fileName || "").toLowerCase();
+    const isImageFile = lowerFileName.endsWith('.png') || 
+                        lowerFileName.endsWith('.jpg') || 
+                        lowerFileName.endsWith('.jpeg') || 
+                        lowerFileName.endsWith('.tga') || 
+                        lowerFileName.endsWith('.dds') || 
+                        lowerFileName.endsWith('.webp') || 
+                        lowerFileName.endsWith('.gif') || 
+                        lowerFileName.endsWith('.bmp');
+
+    if (isImageFile && effectiveFolder.startsWith("tenants")) {
+      effectiveFolder = "images";
+      console.log(`[Cache System] Redirected image file "${fileName}" request from "${folder}" to "images" folder`);
+    }
+
     // Step 0: Pre-resolve virtual/relative filenames using the metadata list if available
     let targetFileName = fileName;
-    const listResolvedName = fuzzyLocateInFileList(folder, fileName, activeClient);
+    const listResolvedName = fuzzyLocateInFileList(effectiveFolder, fileName, activeClient);
     if (listResolvedName) {
       console.log(`[Cache System] Pre-resolved virtual filename "${fileName}" to real filename "${listResolvedName}" via metadata list`);
       targetFileName = listResolvedName;
     }
 
     // Step 1: Check for exact match in the disk cache
-    let localFilePath = getLocalCachedFilePath(folder, targetFileName);
+    let localFilePath = getLocalCachedFilePath(effectiveFolder, targetFileName);
     let hasCache = fs.existsSync(localFilePath);
 
     // Step 2: Try fuzzy-matching on disk before calling Azure as a safeguard
     if (!hasCache) {
-      const fuzzyDiskName = fuzzyLocateCachedFile(folder, targetFileName);
+      const fuzzyDiskName = fuzzyLocateCachedFile(effectiveFolder, targetFileName);
       if (fuzzyDiskName) {
         console.log(`[Cache System] Fuzzy match found on disk: "${targetFileName}" mapped to "${fuzzyDiskName}"`);
         targetFileName = fuzzyDiskName;
-        localFilePath = getLocalCachedFilePath(folder, targetFileName);
+        localFilePath = getLocalCachedFilePath(effectiveFolder, targetFileName);
         hasCache = true;
       }
     }
@@ -1260,18 +1277,18 @@ async function startServer() {
 
     // Step 3: Call R2 directly via static file path since we had a cache miss (requesting targetFileName)
     let r2Path = "";
-    if (folder.startsWith("tenants")) {
-      if (folder.includes("/")) {
-        r2Path = `${folder}/${targetFileName}`;
+    if (effectiveFolder.startsWith("tenants")) {
+      if (effectiveFolder.includes("/")) {
+        r2Path = `${effectiveFolder}/${targetFileName}`;
       } else {
         r2Path = `tenants/${activeClient}/${targetFileName}`;
       }
     } else {
-      r2Path = `${folder}/${targetFileName}`;
+      r2Path = `${effectiveFolder}/${targetFileName}`;
     }
     const azureFileUrl = r2PublicUrlFromKey(r2Path);
     try {
-      console.log(`[Proxy] Resilient request for ${folder}/${targetFileName} (original: ${fileName}). URL: ${azureFileUrl} (cacheStatus: MISS)`);
+      console.log(`[Proxy] Resilient request for ${effectiveFolder}/${targetFileName} (original: ${fileName}). URL: ${azureFileUrl} (cacheStatus: MISS)`);
       
       const ext = path.extname(targetFileName).toLowerCase();
       const isFbx = ext === '.fbx';
@@ -1923,23 +1940,52 @@ async function startServer() {
   });
 
   const cleanTranslationText = (txt: string): string => {
-    return txt
+    if (!txt) return '';
+    // 1. First strip HTML tags cleanly
+    let cleaned = txt
+      .replace(/<br\s*\/?>/gi, '. ')
+      .replace(/<\/p>/gi, '. ')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&');
+
+    // 2. Clean AI prefixes, formatting marks, and redundant title headers
+    cleaned = cleaned
       .replace(/^(translation|translated text|hebrew|arabic|russian|english|עברית|ערבית|רוסית|אנגלית):\s*/i, '')
       .replace(/^["'“”]|["'“”]$/g, '') // Remove quotes including smart quotes
       .replace(/\*\*+/g, "") // Remove bold markdown symbols
       .replace(/__+/g, "")
       .replace(/`+/g, "")
       .replace(/\[[^\]]*\]/g, "") // Remove brackets with text inside (e.g. [Mesh], [Object])
-      .replace(/נ"צ מוצר/g, "מק\"ט")
-      .replace(/נ"צ/g, "מק\"ט")
-      // Replace colons, semicolons, and dashes representing labels/separators with a full stop and space to force a beautiful pause between sections
-      .replace(/:/g, ".  ")
-      .replace(/;/g, ".  ")
-      .replace(/\s*[\/\\]\s*/g, ",  ") // Clean slashes with spacious commas
-      .replace(/[#*•\-_]+/g, " ") // Clean weird marks
-      // Keep pauses when reading lists or categories
-      .replace(/,\s*/g, ",  ") // Expand existing commas with a bit more spacing for breathing room
-      .replace(/\s+/g, " ") // Clean multiple spaces
+      .replace(/שם\s*החלק\s*:\s*/gi, '')
+      .replace(/תיאור\s*החלק\s*:\s*/gi, '')
+      .replace(/שם\s*המוצר\s*:\s*/gi, '')
+      .replace(/תיאור\s*המוצר\s*:\s*/gi, '');
+
+    // 3. Hebrew Acronyms & Technical Terms -> Spoken Phonetic Equivalents
+    cleaned = cleaned
+      .replace(/\bנ"צ\s*מוצר\b/gi, 'מַקָ״ט')
+      .replace(/\bנ"צ\b/gi, 'מַקָ״ט')
+      .replace(/\bמק"ט\b/gi, 'מַקָ״ט')
+      .replace(/\bמק״ט\b/gi, 'מַקָ״ט')
+      .replace(/\bמק'ט\b/gi, 'מַקָ״ט')
+      .replace(/(\d+)\s*[xX×]\s*(\d+)/g, '$1 על $2') // e.g. 35X144 -> 35 על 144
+      .replace(/\bמ"מ\b/gi, 'מילימטר')
+      .replace(/\bמ״מ\b/gi, 'מילימטר')
+      .replace(/\bס"מ\b/gi, 'סנטימטר')
+      .replace(/\bס״מ\b/gi, 'סנטימטר')
+      .replace(/\bק"ג\b/gi, 'קילוגרם')
+      .replace(/\bק״ג\b/gi, 'קילוגרם')
+      .replace(/\bמ'\b/gi, 'מטרים');
+
+    // 4. Soften punctuation (replace colons/semicolons with commas for smooth pauses)
+    return cleaned
+      .replace(/\s*:\s*/g, ", ")
+      .replace(/\s*;\s*/g, ", ")
+      .replace(/\s*[\/\\]\s*/g, ", ")
+      .replace(/[#*•\-_]+/g, " ")
+      .replace(/,\s*,+/g, ",")
+      .replace(/\s+/g, " ")
       .trim();
   };
 
@@ -1956,7 +2002,7 @@ async function startServer() {
         const data = await resp.json() as { voices: Array<{ voice_id: string; category: string; name: string }> };
         const premade = (data.voices || []).filter(v => v.category === "premade");
         if (premade.length > 0) {
-          const preferredVec = premade.find(v => ["Brian", "Rachel", "Bella", "Nicole", "Antoni", "Adam"].includes(v.name));
+          const preferredVec = premade.find(v => ["Rachel", "Sarah", "Adam", "Brian", "Bella", "Nicole", "Antoni"].includes(v.name));
           cachedVoiceId = preferredVec ? preferredVec.voice_id : premade[0].voice_id;
           console.log(`[ElevenLabs] Dynamically selected premade voice: "${preferredVec?.name || premade[0].name}" (${cachedVoiceId})`);
           return cachedVoiceId;
@@ -1966,8 +2012,83 @@ async function startServer() {
       console.warn("Error fetching ElevenLabs voices list:", err);
     }
 
-    // Stable, guaranteed premade voice ID (Bella)
-    return "EXAVITQu4vr4xnSDxMaL";
+    // Stable, guaranteed premade voice ID (Rachel)
+    return "21m00Tcm4TlvDq8ikWAM";
+  };
+
+  const generateGoogleTTS = async (text: string, langCode: string = 'he'): Promise<string> => {
+    const cleanedText = cleanTranslationText(text);
+    if (!cleanedText) return "";
+
+    // Chunk text if longer than 180 chars for Google Translate TTS limit
+    const chunks: string[] = [];
+    if (cleanedText.length > 180) {
+      const sentences = cleanedText.match(/[^.!?;\u05C0]+[.!?;\u05C0]+/g) || [cleanedText];
+      let currentChunk = "";
+      for (const sentence of sentences) {
+        if ((currentChunk + sentence).length > 180) {
+          if (currentChunk.trim()) chunks.push(currentChunk.trim());
+          currentChunk = sentence;
+        } else {
+          currentChunk += sentence;
+        }
+      }
+      if (currentChunk.trim()) chunks.push(currentChunk.trim());
+    } else {
+      chunks.push(cleanedText);
+    }
+
+    const buffers: Buffer[] = [];
+    for (const chunk of chunks) {
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${langCode}&client=tw-ob&q=${encodeURIComponent(chunk)}`;
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`Google TTS failed with status ${response.status}`);
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      buffers.push(Buffer.from(arrayBuffer));
+    }
+
+    const combined = Buffer.concat(buffers);
+    return combined.toString("base64");
+  };
+
+  const generateTTSAudio = async (text: string, langCode: string = 'he'): Promise<string> => {
+    const cleanedText = cleanTranslationText(text);
+    if (!cleanedText) return "";
+
+    const targetLang = (langCode || 'he').toLowerCase();
+
+    // For Hebrew and Arabic, Google Translate TTS provides official native voice narration ("Google עברית")
+    if (targetLang === 'he' || targetLang === 'ar') {
+      try {
+        const audio = await generateGoogleTTS(cleanedText, targetLang);
+        if (audio) {
+          console.log(`[TTS] Generated Google Native TTS for ${targetLang}`);
+          return audio;
+        }
+      } catch (gErr) {
+        console.warn(`[TTS] Google TTS failed for ${targetLang}, falling back to ElevenLabs/other...`, gErr);
+      }
+    }
+
+    // Try ElevenLabs if API key exists
+    const apiKey = process.env.API_Key_Eleven || process.env.API_KEY_ELEVEN || process.env.ELEVEN_API_KEY;
+    if (apiKey) {
+      try {
+        const audio = await generateElevenLabsTTS(cleanedText);
+        if (audio) return audio;
+      } catch (eErr) {
+        console.warn(`[TTS] ElevenLabs failed, falling back to Google TTS...`, eErr);
+      }
+    }
+
+    // Fallback to Google TTS
+    return await generateGoogleTTS(cleanedText, targetLang);
   };
 
   // Helper to generate TTS using ElevenLabs
@@ -1986,7 +2107,14 @@ async function startServer() {
     const voiceId = await getElevenLabsVoiceId(apiKey);
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
 
-    const response = await fetch(url, {
+    const voiceSettings = {
+      stability: 0.55,
+      similarity_boost: 0.80,
+      style: 0.0,
+      use_speaker_boost: true
+    };
+
+    let response = await fetch(url, {
       method: "POST",
       headers: {
         "xi-api-key": apiKey,
@@ -1995,15 +2123,27 @@ async function startServer() {
       },
       body: JSON.stringify({
         text: cleanedText,
-        model_id: "eleven_multilingual_v2",
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.05,
-          use_speaker_boost: true
-        }
+        model_id: "eleven_turbo_v2_5",
+        voice_settings: voiceSettings
       })
     });
+
+    if (!response.ok) {
+      console.warn(`[ElevenLabs] eleven_turbo_v2_5 failed (${response.status}), retrying with eleven_multilingual_v2...`);
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+          "accept": "audio/mpeg"
+        },
+        body: JSON.stringify({
+          text: cleanedText,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: voiceSettings
+        })
+      });
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -2060,23 +2200,23 @@ async function startServer() {
         console.log(`[FAST-TTS] Translation succeeded: "${text}" -> "${textToSpeak}"`);
       }
 
-      // 2. TTS Generation (EXCLUSIVE to ElevenLabs)
+      // 2. TTS Generation (Native Google TTS for Hebrew/Arabic, ElevenLabs/Google for others)
       const ttsStartTime = Date.now();
       let audioBase64 = "";
 
       try {
-        audioBase64 = await generateElevenLabsTTS(textToSpeak);
-      } catch (elevenErr: any) {
-        console.error(`[FAST-TTS] ElevenLabs audio generation failed: ${elevenErr.message || elevenErr}`);
-        return res.status(500).json({ error: "ElevenLabs Generation failed", details: elevenErr.message || String(elevenErr) });
+        audioBase64 = await generateTTSAudio(textToSpeak, langCode);
+      } catch (ttsErr: any) {
+        console.error(`[FAST-TTS] Audio generation failed: ${ttsErr.message || ttsErr}`);
+        return res.status(500).json({ error: "TTS Generation failed", details: ttsErr.message || String(ttsErr) });
       }
 
-      console.log(`[FAST-TTS] Total time: ${Date.now() - startTime}ms (ElevenLabs TTS portion: ${Date.now() - ttsStartTime}ms)`);
+      console.log(`[FAST-TTS] Total time: ${Date.now() - startTime}ms (TTS portion: ${Date.now() - ttsStartTime}ms)`);
 
       if (audioBase64 !== undefined) {
         res.json({ audio: audioBase64, translatedText: textToSpeak });
       } else {
-        res.status(500).json({ error: "No audio generated from ElevenLabs" });
+        res.status(500).json({ error: "No audio generated" });
       }
     } catch (err: any) {
       console.error("Fast TTS Error:", err);
@@ -2086,19 +2226,18 @@ async function startServer() {
 
   // API Route for TTS
   app.post("/api/ai/tts", async (req, res) => {
-    const { text } = req.body;
+    const { text, langCode } = req.body;
     if (!text) return res.status(400).json({ error: "text is required" });
 
     const startTime = Date.now();
     try {
-      // EXCLUSIVE to ElevenLabs, no fallbacks to Google's TTS
-      const audioBase64 = await generateElevenLabsTTS(text);
-      console.log(`[TTS] ElevenLabs generated in ${Date.now() - startTime}ms for text length: ${text.length}`);
+      const audioBase64 = await generateTTSAudio(text, langCode || 'he');
+      console.log(`[TTS] Audio generated in ${Date.now() - startTime}ms for text length: ${text.length}`);
 
       if (audioBase64 !== undefined) {
         res.json({ audio: audioBase64 });
       } else {
-        res.status(500).json({ error: "No audio generated from ElevenLabs" });
+        res.status(500).json({ error: "No audio generated" });
       }
     } catch (err: any) {
       console.error("TTS API Error:", err);
