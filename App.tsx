@@ -1120,7 +1120,7 @@ const App: React.FC = () => {
     heightMappings: {}, specularMappings: {},
     hoveredMaterial: null, isExploded: false, explodeFactor: 0,
     isPlayingAnimation: false,
-    animationDirection: 'backward',
+    animationDirection: 'forward',
     colorVariants: [], activeVariant: null,
     flipY: true,
     wireframe: false,
@@ -2032,22 +2032,25 @@ const App: React.FC = () => {
     if (!selectedId || !selectedModel) return;
     
     const isPlaying = selectedModel.settings.isPlayingAnimation;
+    const currentDirection = selectedModel.settings.animationDirection || 'forward';
     
-    if (!isPlaying) {
-      // Start forward
+    if (isPlaying) {
+      // If currently playing, toggle direction mid-animation
+      const nextDirection = currentDirection === 'forward' ? 'backward' : 'forward';
       updateModelData(selectedId, {
         settings: {
           ...selectedModel.settings,
           isPlayingAnimation: true,
-          animationDirection: 'forward'
+          animationDirection: nextDirection
         }
       });
     } else {
-      // Already in "Play" state (could be at the end). Start backward.
+      // If stopped, start playing in currentDirection ('forward' initially, 'backward' when forward finished)
       updateModelData(selectedId, {
         settings: {
           ...selectedModel.settings,
-          animationDirection: 'backward'
+          isPlayingAnimation: true,
+          animationDirection: currentDirection
         }
       });
     }
@@ -2056,11 +2059,23 @@ const App: React.FC = () => {
   const handleAnimationFinished = () => {
     if (!selectedId || !selectedModel) return;
     
-    // Only set isPlayingAnimation to false if we just finished a backward animation
-    if (selectedModel.settings.animationDirection === 'backward') {
+    const currentDirection = selectedModel.settings.animationDirection || 'forward';
+    
+    if (currentDirection === 'forward') {
+      // Finished playing forward: switch direction to backward so the button shows "Reverse Animation"
       updateModelData(selectedId, {
         settings: {
           ...selectedModel.settings,
+          animationDirection: 'backward',
+          isPlayingAnimation: false
+        }
+      });
+    } else {
+      // Finished playing backward: switch direction to forward so the button shows "Play Animation"
+      updateModelData(selectedId, {
+        settings: {
+          ...selectedModel.settings,
+          animationDirection: 'forward',
           isPlayingAnimation: false
         }
       });
@@ -2356,7 +2371,7 @@ const App: React.FC = () => {
             antialias: true, 
             alpha: true,
             sortObjects: true,
-            logarithmicDepthBuffer: false
+            logarithmicDepthBuffer: true
           }} 
           onCreated={({ gl }) => {
             gl.debug.checkShaderErrors = false;
@@ -2365,7 +2380,7 @@ const App: React.FC = () => {
           style={{ background: 'transparent' }}
           onPointerDown={() => { if (isMoveMode) setIsMoveMode(false); setTargetView(null); }}
         >
-          <PerspectiveCamera makeDefault position={isMobile ? [0, 40, 180] : [0, 30, 120]} fov={35} near={0.1} far={2000} />
+          <PerspectiveCamera makeDefault position={isMobile ? [0, 40, 180] : [0, 30, 120]} fov={35} near={0.5} far={2000} />
           <CameraHandler targetView={targetView} controlsRef={controlsRef} activePartMesh={activePart?.mesh} orbitDirection={orbitDirection} />
 
           <Suspense fallback={<Html center><div className="text-yellow-500 font-black uppercase tracking-[0.5em] animate-pulse text-[10px]">{t.initializing}</div></Html>}>
@@ -3090,6 +3105,7 @@ const App: React.FC = () => {
       <CameraControls 
         onAction={handleCameraAction} 
         isPlayingAnimation={selectedModel?.settings.isPlayingAnimation}
+        animationDirection={selectedModel?.settings.animationDirection}
         onToggleAnimation={handleToggleAnimation}
         language={language}
         hasAnimations={selectedModel?.hasAnimations}
