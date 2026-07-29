@@ -5,6 +5,7 @@ import { Language, translations } from '../src/translations';
 interface CameraControlsProps {
   onAction: (action: string) => void;
   isPlayingAnimation?: boolean;
+  animationDirection?: 'forward' | 'backward';
   onToggleAnimation?: () => void;
   language: Language;
   hasAnimations?: boolean;
@@ -16,6 +17,7 @@ interface CameraControlsProps {
 const CameraControls: React.FC<CameraControlsProps> = ({ 
   onAction, 
   isPlayingAnimation, 
+  animationDirection,
   onToggleAnimation, 
   language, 
   hasAnimations, 
@@ -25,6 +27,7 @@ const CameraControls: React.FC<CameraControlsProps> = ({
 }) => {
   const t = translations[language];
   const isRTL = language === 'he' || language === 'ar';
+  const isReverse = animationDirection === 'backward';
 
   return (
     <div 
@@ -70,22 +73,28 @@ const CameraControls: React.FC<CameraControlsProps> = ({
         </button>
       </div>
 
-      {/* Animation Play/Pause */}
+      {/* Animation Play/Reverse */}
       {hasAnimations && onToggleAnimation && (
         <button
           onClick={onToggleAnimation}
-          className={`w-8 h-8 sm:w-12 sm:h-12 border border-black/5 rounded-lg sm:rounded-2xl flex items-center justify-center transition-all shadow-2xl group relative ${isPlayingAnimation ? 'bg-purple-500 text-white' : 'bg-white/90 backdrop-blur-xl text-zinc-400 hover:text-purple-400 hover:bg-white'}`}
-          title={isPlayingAnimation ? t.stopAnimation : t.playAnimation}
+          className={`w-8 h-8 sm:w-12 sm:h-12 border border-black/5 rounded-lg sm:rounded-2xl flex items-center justify-center transition-all shadow-2xl group relative ${
+            isReverse || isPlayingAnimation 
+              ? 'bg-purple-600 text-white shadow-purple-500/20' 
+              : 'bg-white/90 backdrop-blur-xl text-zinc-400 hover:text-purple-500 hover:bg-white'
+          }`}
+          title={isReverse ? t.reverseAnimation : t.playAnimation}
         >
           <svg className="w-3.5 h-3.5 sm:w-5 sm:h-5" fill="currentColor" viewBox="0 0 24 24">
-            {isPlayingAnimation ? (
-              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+            {isReverse ? (
+              /* Reverse Icon: Triangle pointing left */
+              <path d="M16 5v14l-11-7z"/>
             ) : (
+              /* Play Icon: Triangle pointing right */
               <path d="M8 5v14l11-7z"/>
             )}
           </svg>
           <span className="hidden sm:block absolute px-2 py-1 bg-black text-white text-[8px] font-black uppercase tracking-widest rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap border border-white/10 right-full mr-3">
-            {isPlayingAnimation ? t.stopAnimation : t.playAnimation}
+            {isReverse ? t.reverseAnimation : t.playAnimation}
           </span>
         </button>
       )}
