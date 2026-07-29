@@ -1888,7 +1888,6 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
           mat.alphaMap = alphaTex;
           mat.transparent = true;
           mat.depthWrite = false;
-            mat.opacity = 0.5;
 
 
           // Stable for thin transparent surfaces from either viewing side.
