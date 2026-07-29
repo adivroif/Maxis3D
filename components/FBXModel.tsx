@@ -456,6 +456,122 @@ function areLikelyAlphaOccludingDuplicates(
 }
 
 
+
+function getMeshDebugInfo(mesh: THREE.Mesh) {
+  mesh.updateWorldMatrix(true, false);
+
+  const box = new THREE.Box3().setFromObject(mesh);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+
+  const position = mesh.geometry?.attributes?.position;
+  const uv = mesh.geometry?.attributes?.uv;
+  const index = mesh.geometry?.getIndex();
+
+  return {
+    mesh: mesh.name,
+    meshUUID: mesh.uuid,
+    visible: mesh.visible,
+    renderOrder: mesh.renderOrder,
+    vertexCount: position?.count ?? 0,
+    uvCount: uv?.count ?? 0,
+    triangleCount: index ? index.count / 3 : ((position?.count ?? 0) / 3),
+    worldBox: {
+      min: { x: box.min.x, y: box.min.y, z: box.min.z },
+      max: { x: box.max.x, y: box.max.y, z: box.max.z },
+      size: { x: size.x, y: size.y, z: size.z },
+      center: { x: center.x, y: center.y, z: center.z },
+    },
+    materials: getMaterialNames(mesh),
+  };
+}
+
+function analyzeMeshUvAgainstAlpha(
+  mesh: THREE.Mesh,
+  texture: THREE.Texture,
+  opaqueThreshold = 0.995
+) {
+  const uv = mesh.geometry?.attributes?.uv as
+    | THREE.BufferAttribute
+    | THREE.InterleavedBufferAttribute
+    | undefined;
+
+  const alphaData = getAlphaPixels(texture);
+
+  if (!uv || uv.count === 0 || !alphaData) {
+    return {
+      available: false,
+      uvCount: uv?.count ?? 0,
+    };
+  }
+
+  const { width, height, pixels } = alphaData;
+  const transformed = new THREE.Vector2();
+
+  const sample = (u: number, v: number) => {
+    transformed.set(u, v);
+    texture.transformUv(transformed);
+
+    const x = Math.min(width - 1, Math.max(0, Math.floor(transformed.x * width)));
+    const y = Math.min(height - 1, Math.max(0, Math.floor(transformed.y * height)));
+    return pixels[(y * width + x) * 4 + 1] / 255;
+  };
+
+  // Diagnostic only: sample up to ~600 UV vertices evenly across the mesh.
+  const step = Math.max(1, Math.floor(uv.count / 600));
+
+  let min = 1;
+  let max = 0;
+  let sum = 0;
+  let count = 0;
+  let transparentSamples = 0;
+
+  for (let i = 0; i < uv.count; i += step) {
+    const a = sample(uv.getX(i), uv.getY(i));
+    min = Math.min(min, a);
+    max = Math.max(max, a);
+    sum += a;
+    count++;
+
+    if (a < opaqueThreshold) {
+      transparentSamples++;
+    }
+  }
+
+  return {
+    available: true,
+    uvCount: uv.count,
+    sampledCount: count,
+    minAlpha: min,
+    maxAlpha: max,
+    avgAlpha: count ? sum / count : null,
+    nonOpaqueSamples: transparentSamples,
+    nonOpaqueRatio: count ? transparentSamples / count : 0,
+  };
+}
+
+
+function meshUsesAlphaByUv(
+  mesh: THREE.Mesh,
+  texture: THREE.Texture,
+  opaqueThreshold = 0.995
+): boolean {
+  const result = analyzeMeshUvAgainstAlpha(mesh, texture, opaqueThreshold);
+
+  if (!result.available) {
+    // Preserve alpha if inspection is unavailable rather than accidentally
+    // forcing a genuinely transparent mesh opaque.
+    return true;
+  }
+
+  return (
+    (result.nonOpaqueSamples ?? 0) > 0 &&
+    (result.minAlpha ?? 1) < opaqueThreshold
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Matching & UDIM helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1751,61 +1867,73 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
         mat.roughnessMap = roughTex || null;
 
 // ── 7. Opacity / Alpha ───────────────────────────────────────────────
+        const alphaTex =
+          tex(getValidMappingUrl(settings.alphaMappings?.[mat.name])) ??
+          tex(set?.alpha);
 
-const alphaTex =
-  tex(getValidMappingUrl(settings.alphaMappings?.[mat.name])) ??
-  tex(set?.alpha);
+        const usesAlpha = !!(
+          alphaTex &&
+          mesh.geometry &&
+          meshUsesAlphaByUv(mesh, alphaTex)
+        );
 
-const usesAlpha = !!(
-  alphaTex &&
-  mesh.geometry &&
-  meshActuallyUsesTransparency(mesh.geometry, alphaTex)
-);
+        mat.opacity = 1.0;
+        mat.alphaTest = 0;
+        mat.alphaHash = false;
+        mat.depthTest = true;
+        mat.premultipliedAlpha = false;
 
-mat.opacity = 1.0;
-mat.alphaTest = 0;
-mat.alphaHash = false;
-mat.depthTest = true;
-mat.premultipliedAlpha = false;
+        if (usesAlpha && alphaTex) {
+          // The mesh's OWN UVs actually sample a non-opaque region.
+          mat.alphaMap = alphaTex;
+          mat.transparent = true;
+          mat.depthWrite = false;
+            mat.opacity = 0.5;
 
-if (usesAlpha && alphaTex) {
-  mat.alphaMap = alphaTex;
-  mat.transparent = true;
-  mat.depthWrite = false;
 
-  // אל תשנה DoubleSide כרגע
-  mat.side = THREE.FrontSide;
+          // Stable for thin transparent surfaces from either viewing side.
+          mat.side = THREE.DoubleSide;
+          (mat as any).forceSinglePass = true;
 
-  console.log('[REAL ALPHA]', {
-    mesh: mesh.name,
-    material: mat.name,
-    materialUUID: mat.uuid,
-    alphaUUID: alphaTex.uuid,
-    hasBaseColor: !!mat.map,
-    baseColorUUID: mat.map?.uuid,
-    color: mat.color.getHexString(),
-    targets: set?.targets
-  });
+          console.log('[REAL ALPHA - UV VERIFIED]', {
+            mesh: mesh.name,
+            material: mat.name,
+            materialUUID: mat.uuid,
+            alphaUUID: alphaTex.uuid,
+            uvAlpha: analyzeMeshUvAgainstAlpha(mesh, alphaTex),
+            hasBaseColor: !!mat.map,
+            baseColorUUID: mat.map?.uuid,
+            color: mat.color.getHexString(),
+            targets: set?.targets
+          });
+        } else {
+          // Even if the material family has an opacity atlas, this mesh's UVs
+          // sample only fully-opaque texels, so keep it in the opaque pass.
+          mat.alphaMap = null;
+          mat.transparent = false;
+          mat.depthWrite = true;
 
-} else {
-  mat.alphaMap = null;
-  mat.transparent = false;
-  mat.depthWrite = true;
-  mat.side = THREE.FrontSide;
+          mat.side = THREE.DoubleSide;
+          (mat as any).forceSinglePass = true;
 
-  if (alphaTex) {
-    console.log('[ALPHA SKIPPED - OPAQUE UV]', {
-      mesh: mesh.name,
-      material: mat.name,
-      materialUUID: mat.uuid,
-      hasBaseColor: !!mat.map,
-      baseColorUUID: mat.map?.uuid,
-      color: mat.color.getHexString()
-    });
-  }
-}
+          if (alphaTex) {
+            console.log('[ALPHA OPAQUE BY UV]', {
+              mesh: mesh.name,
+              material: mat.name,
+              materialUUID: mat.uuid,
+              uvAlpha: analyzeMeshUvAgainstAlpha(mesh, alphaTex),
+              hasBaseColor: !!mat.map,
+              baseColorUUID: mat.map?.uuid,
+              color: mat.color.getHexString()
+            });
+          }
+        }
 
-mat.needsUpdate = true;
+        // Never hide geometry based on overlap/proximity.
+        mesh.visible = true;
+        mesh.renderOrder = 0;
+
+        mat.needsUpdate = true;
 
         // ── 8. Emissive ────────────────────────────────────────────────────
         const emissiveTex = tex(getValidMappingUrl(settings.emissiveMappings?.[mat.name])) ?? tex(set?.emissive);
@@ -1887,65 +2015,7 @@ mat.needsUpdate = true;
   //
   // Resolve this automatically from material state + geometry overlap, without
   // any model/mesh-name hardcoding.
-  useEffect(() => {
-    if (!fbx) return;
-
-    const meshes: THREE.Mesh[] = [];
-
-    fbx.updateMatrixWorld(true);
-
-    fbx.traverse((child) => {
-      if (!(child as THREE.Mesh).isMesh) return;
-
-      const mesh = child as THREE.Mesh;
-
-      // Only undo visibility changes made by THIS automatic resolver.
-      // Do not override visibility controlled by product/model-part settings.
-      if (mesh.userData.__autoHiddenByAlphaOverlap === true) {
-        mesh.visible = true;
-        mesh.userData.__autoHiddenByAlphaOverlap = false;
-      }
-
-      meshes.push(mesh);
-    });
-
-    const transparentMeshes = meshes.filter(meshHasRealAlphaMaterial);
-    const opaqueMeshes = meshes.filter(meshIsOpaqueForAlpha);
-
-    const hidden = new Set<THREE.Mesh>();
-
-    for (const transparentMesh of transparentMeshes) {
-      for (const opaqueMesh of opaqueMeshes) {
-        if (hidden.has(opaqueMesh)) continue;
-
-        if (
-          !areLikelyAlphaOccludingDuplicates(
-            transparentMesh,
-            opaqueMesh
-          )
-        ) {
-          continue;
-        }
-
-        opaqueMesh.visible = false;
-        opaqueMesh.userData.__autoHiddenByAlphaOverlap = true;
-        hidden.add(opaqueMesh);
-
-        console.log('[AUTO ALPHA OVERLAP] Hiding opaque duplicate', {
-          transparentMesh: transparentMesh.name,
-          hiddenOpaqueMesh: opaqueMesh.name,
-          material: getMaterialNames(transparentMesh),
-        });
-      }
-    }
-  }, [
-    fbx,
-    textureCache,
-    textureSets,
-    settings.alphaMappings,
-    settings.materialMappings,
-    settings.flipY
-  ]);
+  
 
   // ── Pre-process: center, scale, extract material names ───────────────────
   const [materialNames, setMaterialNames] = useState<string[]>([]);
