@@ -3,7 +3,7 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { SceneModelInstance } from '../types';
 import { Language, translations } from '../src/translations';
-import { translateText } from '../services/ttsService';
+import { translateText, translateBatch, getCachedTranslation } from '../services/ttsService';
 import { getLocalizedProductData } from '../App';
 
 interface SidebarProps {
@@ -46,7 +46,7 @@ const getLocalizedCategoryFromItem = (item: any, lang: Language): string => {
   else if (lang === 'ar') val = item.categoryName_ar || item.CategoryName_ar || item.categoryName_AR || item.productCategory_ar || item.category_ar || '';
 
   if (!val || val.trim() === '') {
-    val = item.categoryName_he || item.CategoryName_he || item.categoryName_en || item.CategoryName_en || item.categoryName_ru || item.categoryName_ar || item.categoryName || item.CategoryName || item.productCategory || item.ProductCategory || item.category || item.Category || item.name || item.title || '';
+    val = item.categoryName_he || item.CategoryName_he || item.categoryName_en || item.CategoryName_en || item.categoryName || item.CategoryName || item.productCategory || item.ProductCategory || item.category || item.Category || item.name || item.title || '';
   }
   return cleanEscapedQuotes(val);
 };
@@ -60,7 +60,7 @@ const getLocalizedSubCategoryFromItem = (item: any, lang: Language): string => {
   else if (lang === 'ar') val = item.subCategory_ar || item.SubCategory_ar || item.subCategory_AR || item.productSubCategory_ar || item.subcategory_ar || '';
 
   if (!val || val.trim() === '') {
-    val = item.subCategory_he || item.SubCategory_he || item.subCategory_en || item.subCategory_ru || item.subCategory_ar || item.subCategory || item.SubCategory || item.productSubCategory || item.ProductSubCategory || item.subcategory || item.Subcategory || '';
+    val = item.subCategory_he || item.SubCategory_he || item.subCategory_en || item.subCategory || item.SubCategory || item.productSubCategory || item.ProductSubCategory || item.subcategory || item.Subcategory || '';
   }
   return cleanEscapedQuotes(val);
 };
@@ -596,15 +596,28 @@ const Sidebar: React.FC<SidebarProps> = ({
         newTranslations[normalizedName] = { name: titleToUse, description: descToUse };
 
         if (titleNeedsTrans || descNeedsTrans) {
-          mapping.push({
-            normalized: normalizedName,
-            titleNeedsTrans,
-            descNeedsTrans,
-            origTitle: titleToUse,
-            origDesc: descToUse
-          });
-          if (titleNeedsTrans) itemsToTranslate.push(titleToUse);
-          if (descNeedsTrans) itemsToTranslate.push(descToUse);
+          const cachedTitle = titleNeedsTrans ? getCachedTranslation(titleToUse, langName) : null;
+          const cachedDesc = descNeedsTrans ? getCachedTranslation(descToUse, langName) : null;
+
+          const activeTitle = cachedTitle || titleToUse;
+          const activeDesc = cachedDesc || descToUse;
+
+          newTranslations[normalizedName] = { name: activeTitle, description: activeDesc };
+
+          const needsTitleApi = titleNeedsTrans && !cachedTitle;
+          const needsDescApi = descNeedsTrans && !cachedDesc;
+
+          if (needsTitleApi || needsDescApi) {
+            mapping.push({
+              normalized: normalizedName,
+              titleNeedsTrans: needsTitleApi,
+              descNeedsTrans: needsDescApi,
+              origTitle: activeTitle,
+              origDesc: activeDesc
+            });
+            if (needsTitleApi) itemsToTranslate.push(titleToUse);
+            if (needsDescApi) itemsToTranslate.push(descToUse);
+          }
         }
       });
 
@@ -612,7 +625,6 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       if (itemsToTranslate.length > 0) {
         try {
-          const { translateBatch } = await import('../services/ttsService');
           const translatedResults = await translateBatch(itemsToTranslate, langName);
           
           let resultIdx = 0;
@@ -759,11 +771,18 @@ const Sidebar: React.FC<SidebarProps> = ({
             }
           }
 
+          const cached = getCachedTranslation(sub, langName);
+          if (cached) {
+            newTranslations[sub] = cached;
+            return;
+          }
+
           subsToTranslate.push(sub);
         });
 
+        setTranslatedSubCategories({ ...newTranslations });
+
         if (subsToTranslate.length > 0 && language !== 'en') {
-          const { translateBatch } = await import('../services/ttsService');
           const translatedResults = await translateBatch(subsToTranslate, langName);
           subsToTranslate.forEach((sub, idx) => {
             newTranslations[sub] = translatedResults[idx] || sub;
@@ -820,11 +839,18 @@ const Sidebar: React.FC<SidebarProps> = ({
             }
           }
 
+          const cached = getCachedTranslation(cat, langName);
+          if (cached) {
+            newTranslations[cat] = cached;
+            return;
+          }
+
           catsToTranslate.push(cat);
         });
 
+        setTranslatedCategories({ ...newTranslations });
+
         if (catsToTranslate.length > 0 && language !== 'en') {
-          const { translateBatch } = await import('../services/ttsService');
           const translatedResults = await translateBatch(catsToTranslate, langName);
           catsToTranslate.forEach((cat, idx) => {
             newTranslations[cat] = translatedResults[idx] || cat;
