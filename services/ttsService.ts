@@ -243,7 +243,28 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   }
 }
 
-const translationCache: Record<string, string> = {};
+const LOCAL_STORAGE_CACHE_KEY = 'app_translation_cache_v2';
+const translationCache: Record<string, string> = (() => {
+  try {
+    const saved = localStorage.getItem(LOCAL_STORAGE_CACHE_KEY);
+    return saved ? JSON.parse(saved) : {};
+  } catch (e) {
+    return {};
+  }
+})();
+
+const saveCacheToLocalStorage = () => {
+  try {
+    localStorage.setItem(LOCAL_STORAGE_CACHE_KEY, JSON.stringify(translationCache));
+  } catch (e) {}
+};
+
+export const getCachedTranslation = (text: string, targetLanguage: string): string | null => {
+  if (!text) return null;
+  const langCode = targetLanguage === 'Hebrew' || targetLanguage === 'he' ? 'he' : targetLanguage === 'Arabic' || targetLanguage === 'ar' ? 'ar' : targetLanguage === 'Russian' || targetLanguage === 'ru' ? 'ru' : 'en';
+  const cacheKey = `${langCode}:${text.trim()}`;
+  return translationCache[cacheKey] || null;
+};
 
 const cleanTranslatedText = (text: string): string => {
   // Remove common AI prefixes like "Translation:", "Translated text:", etc.
@@ -363,6 +384,7 @@ export const translateBatch = async (texts: string[], targetLanguage: string): P
       translationCache[cacheKey] = cleaned;
     });
 
+    saveCacheToLocalStorage();
     return results;
   } catch (error: any) {
     console.error("Batch translation failed:", error);
@@ -401,6 +423,7 @@ export const translateText = async (text: string, targetLanguage: string): Promi
     const data = await response.json();
     const result = cleanTranslatedText(data.translated?.[0] || trimmedText);
     translationCache[cacheKey] = result;
+    saveCacheToLocalStorage();
     console.log(`[CLIENT] Translation took ${Date.now() - startTime}ms`);
     return result;
   } catch (error) {

@@ -1823,6 +1823,24 @@ async function startServer() {
     await handleGetFileResiliently(folder as string, fileName as string, (clientName as string) || "tenantA", res);
   });
 
+  // Server-side translation memory cache
+  const translationCacheFile = path.join(azureCacheDir, "translation_cache.json");
+  let serverTranslationCache: Record<string, string> = {};
+  try {
+    if (fs.existsSync(translationCacheFile)) {
+      serverTranslationCache = JSON.parse(fs.readFileSync(translationCacheFile, "utf-8"));
+    }
+  } catch (e) {
+    serverTranslationCache = {};
+  }
+
+  const saveServerTranslationCache = () => {
+    try {
+      if (!fs.existsSync(azureCacheDir)) fs.mkdirSync(azureCacheDir, { recursive: true });
+      fs.writeFileSync(translationCacheFile, JSON.stringify(serverTranslationCache, null, 2), "utf-8");
+    } catch (e) {}
+  };
+
   // API Route for translation
   app.post("/api/ai/translate", async (req, res) => {
     const { texts, targetLanguage } = req.body;
@@ -1894,104 +1912,116 @@ async function startServer() {
     }).filter(t => t.length > 0);
     
     if (validTexts.length === 0) {
-      console.log("No valid texts to translate, returning originals.");
       return res.json({ translated: texts });
     }
 
     const translatedResultsMap = new Map<string, string>();
     const uniqueTexts = Array.from(new Set(validTexts));
     
-    const BATCH_SIZE = 25;
-    for (let i = 0; i < uniqueTexts.length; i += BATCH_SIZE) {
-      const batch = uniqueTexts.slice(i, i + BATCH_SIZE);
-      let batchResults: string[] = [];
-      let success = false;
+    // Check server cache first
+    const uncachedTexts: string[] = [];
+    let cacheChanged = false;
 
-      // Try 1: Google Cloud Translate
-      if (translate) {
-        try {
-          console.log(`[Translate API] Translating batch of ${batch.length} items to '${langCode}'...`);
-          const [translations] = await translate.translate(batch, langCode);
-          batchResults = Array.isArray(translations) ? translations : [translations];
-          if (batchResults.length === batch.length) {
-            success = true;
-            console.log(`[Translate API] Batch translated successfully.`);
-          }
-        } catch (err: any) {
-          console.error("[Translate API] Error in Cloud Translation batch:", err.message || err);
-        }
-      }
-
-      // Try 2: Gemini Fallback with JSON structured schema
-      if (!success && ai) {
-        try {
-          console.log(`[Gemini Fallback] Translating batch of ${batch.length} items to '${targetLanguage}'...`);
-          const prompt = `You are a professional translator. Translate this array of strings to correct and natural ${targetLanguage}:\n${JSON.stringify(batch)}\n\nIMPORTANT: Maintain technical and 3D model terminology correctly and output the exact same number of items in the response array (exactly ${batch.length} items).`;
-          
-          const result = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: "ARRAY",
-                items: { type: "STRING" },
-                description: "List of translated texts matching the exact sequence and length of the inputs."
-              }
-            }
-          });
-
-          const responseText = (result.text || "").trim();
-          const parsed = JSON.parse(responseText);
-          if (Array.isArray(parsed) && parsed.length === batch.length) {
-            batchResults = parsed;
-            success = true;
-            console.log(`[Gemini Fallback] Batch translated successfully via structured schema.`);
-          } else {
-            console.warn(`[Gemini Fallback] Schema output length mismatch or not an array. Expected ${batch.length}, got ${parsed?.length}.`);
-          }
-        } catch (geminiErr: any) {
-          console.error("[Gemini Fallback] Gemini translation failed for batch:", geminiErr.message || geminiErr);
-        }
-      }
-
-      // Try 3: If batch translation failed entirely, try items individually
-      if (!success) {
-        console.warn(`[Fallback] Batch translation failed, falling back to individual item translation for ${batch.length} items...`);
-        for (const item of batch) {
-          let itemResult = item;
-          let itemSuccess = false;
-
-          if (translate) {
-            try {
-              const [translation] = await translate.translate(item, langCode);
-              itemResult = translation;
-              itemSuccess = true;
-            } catch (err) {}
-          }
-
-          if (!itemSuccess && ai) {
-            try {
-              const prompt = `Translate this text to ${targetLanguage}. Return ONLY the direct translation. Text: "${item}"`;
-              const result = await ai.models.generateContent({
-                model: "gemini-3.5-flash",
-                contents: [{ role: "user", parts: [{ text: prompt }] }]
-              });
-              itemResult = cleanTranslationText(result.text || item);
-              itemSuccess = true;
-            } catch (err) {}
-          }
-
-          translatedResultsMap.set(item, itemResult);
-        }
+    uniqueTexts.forEach(text => {
+      const key = `${langCode}:${text}`;
+      if (serverTranslationCache[key]) {
+        translatedResultsMap.set(text, serverTranslationCache[key]);
       } else {
-        batch.forEach((item, idx) => {
-          translatedResultsMap.set(item, batchResults[idx] || item);
-        });
+        uncachedTexts.push(text);
+      }
+    });
+
+    if (uncachedTexts.length > 0) {
+      const BATCH_SIZE = 25;
+      for (let i = 0; i < uncachedTexts.length; i += BATCH_SIZE) {
+        const batch = uncachedTexts.slice(i, i + BATCH_SIZE);
+        let batchResults: string[] = [];
+        let success = false;
+
+        // Try 1: Google Cloud Translate
+        if (translate) {
+          try {
+            console.log(`[Translate API] Translating batch of ${batch.length} uncached items to '${langCode}'...`);
+            const [translations] = await translate.translate(batch, langCode);
+            batchResults = Array.isArray(translations) ? translations : [translations];
+            if (batchResults.length === batch.length) {
+              success = true;
+            }
+          } catch (err: any) {
+            console.error("[Translate API] Error in Cloud Translation batch:", err.message || err);
+          }
+        }
+
+        // Try 2: Gemini Fallback with JSON structured schema
+        if (!success && ai) {
+          try {
+            console.log(`[Gemini Fallback] Translating batch of ${batch.length} uncached items to '${targetLanguage}'...`);
+            const prompt = `You are a professional translator. Translate this array of strings to correct and natural ${targetLanguage}:\n${JSON.stringify(batch)}\n\nIMPORTANT: Maintain technical and 3D model terminology correctly and output the exact same number of items in the response array (exactly ${batch.length} items).`;
+            
+            const result = await ai.models.generateContent({
+              model: "gemini-3.5-flash",
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: "ARRAY",
+                  items: { type: "STRING" },
+                  description: "List of translated texts matching the exact sequence and length of the inputs."
+                }
+              }
+            });
+
+            const responseText = (result.text || "").trim();
+            const parsed = JSON.parse(responseText);
+            if (Array.isArray(parsed) && parsed.length === batch.length) {
+              batchResults = parsed;
+              success = true;
+            }
+          } catch (geminiErr: any) {
+            console.error("[Gemini Fallback] Gemini translation failed for batch:", geminiErr.message || geminiErr);
+          }
+        }
+
+        if (success) {
+          batch.forEach((item, idx) => {
+            const resVal = batchResults[idx] || item;
+            translatedResultsMap.set(item, resVal);
+            serverTranslationCache[`${langCode}:${item}`] = resVal;
+            cacheChanged = true;
+          });
+        } else {
+          // Individual fallback
+          for (const item of batch) {
+            let itemResult = item;
+            if (translate) {
+              try {
+                const [translation] = await translate.translate(item, langCode);
+                itemResult = translation;
+              } catch (err) {}
+            }
+            if (itemResult === item && ai) {
+              try {
+                const prompt = `Translate this text to ${targetLanguage}. Return ONLY the direct translation. Text: "${item}"`;
+                const result = await ai.models.generateContent({
+                  model: "gemini-3.5-flash",
+                  contents: [{ role: "user", parts: [{ text: prompt }] }]
+                });
+                itemResult = cleanTranslationText(result.text || item);
+              } catch (err) {}
+            }
+            translatedResultsMap.set(item, itemResult);
+            serverTranslationCache[`${langCode}:${item}`] = itemResult;
+            cacheChanged = true;
+          }
+        }
+      }
+
+      if (cacheChanged) {
+        saveServerTranslationCache();
       }
     }
 
-    // Map back to original input array (preserving indices and empty/invalid values)
+    // Map back to original input array
     const finalResults = texts.map(t => {
       if (t !== null && t !== undefined && String(t).trim().length > 0) {
         const cleaned = preprocessForTranslation(String(t));

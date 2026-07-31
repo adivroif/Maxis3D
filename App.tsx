@@ -10,7 +10,7 @@ import { ModelErrorBoundary } from './components/ModelErrorBoundary';
 import Sidebar from './components/Sidebar';
 import CameraControls from './components/CameraControls';
 import { MaterialSettings, SceneModelInstance, ModelPart, ColorVariant, TextureSet } from './types';
-import { speakText, stopSpeaking, translateText, translateBatch } from './services/ttsService';
+import { speakText, stopSpeaking, translateText, translateBatch, getCachedTranslation } from './services/ttsService';
 import { Language, translations } from './src/translations';
 import { parseTextureSets } from './Parsetexturesets';
 
@@ -962,6 +962,20 @@ const App: React.FC = () => {
     const localized = getLocalizedProductData(productDetails.rawProductData, language);
     const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
 
+    // Synchronously check cache for instant transition
+    let initTitle = localized.isExplicitTitle || language === 'en' ? localized.title : (getCachedTranslation(localized.title, langName) || localized.title);
+    let initDesc = localized.isExplicitDesc || language === 'en' ? localized.description : (getCachedTranslation(localized.description, langName) || localized.description);
+    let initCat = localized.isExplicitCategory || language === 'en' ? localized.category : (getCachedTranslation(localized.category, langName) || localized.category);
+    let initSubCat = localized.isExplicitSubCategory || language === 'en' ? localized.subCategory : (getCachedTranslation(localized.subCategory, langName) || localized.subCategory);
+
+    setProductDetails(prev => prev ? { 
+      ...prev, 
+      title: initTitle || prev.originalTitle, 
+      description: initDesc || prev.originalDescription,
+      category: initCat || prev.originalCategory,
+      subCategory: initSubCat || prev.originalSubCategory
+    } : null);
+
     const updateDetails = async () => {
       let finalTitle = localized.title;
       let finalDesc = localized.description;
@@ -1028,10 +1042,14 @@ const App: React.FC = () => {
       baseTitle = productDisplayTitles[normalizedName] || cleanFileName;
     }
 
-    if (isExplicit || language === 'en') {
-      setTranslatedSelectedModelName(baseTitle);
-    } else {
-      const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
+    const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
+    const cachedName = getCachedTranslation(baseTitle, langName);
+
+    if (isExplicit || language === 'en' || cachedName) {
+      setTranslatedSelectedModelName(cachedName || baseTitle);
+    }
+
+    if (!isExplicit && language !== 'en') {
       translateText(baseTitle, langName).then(translated => {
         if (isSubscribed) {
           setTranslatedSelectedModelName(translated || baseTitle);
