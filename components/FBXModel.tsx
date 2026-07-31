@@ -577,6 +577,43 @@ function meshUsesAlphaByUv(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Detects whether names/file paths imply a dark gray vs light gray color distinction,
+ * returning a distinct THREE.Color for dark gray (0x383838) or light gray (0xd8d8d8).
+ */
+function detectColorFromNames(names: (string | undefined)[]): THREE.Color | null {
+  const combined = names
+    .filter((n): n is string => Boolean(n))
+    .map(n => n.toLowerCase())
+    .join(' ');
+
+  if (!combined) return null;
+
+  const hasDark = /\b(dark|dark_gray|darkgray|dark_grey|darkgrey|charcoal)\b/i.test(combined) ||
+                  /_dark_/i.test(combined) ||
+                  /_dark\b/i.test(combined) ||
+                  /dark_gr[aa]y/i.test(combined) ||
+                  /darkgr[aa]y/i.test(combined) ||
+                  /p_?dark/i.test(combined);
+
+  const hasLight = /\b(light|light_gray|lightgray|light_grey|lightgrey|silver)\b/i.test(combined) ||
+                   /_light_/i.test(combined) ||
+                   /_light\b/i.test(combined) ||
+                   /light_gr[aa]y/i.test(combined) ||
+                   /lightgr[aa]y/i.test(combined) ||
+                   /p_?light/i.test(combined);
+
+  if (hasDark && !hasLight) {
+    return new THREE.Color(0x383838); // Dark Gray
+  }
+
+  if (hasLight && !hasDark) {
+    return new THREE.Color(0xd8d8d8); // Light Gray
+  }
+
+  return null;
+}
+
+/**
  * Detects the UDIM tile of a THREE.BufferGeometry based on its average UV coordinates.
  * Returns a number matching standard UDIM format (1001-1100), or null if unable to detect.
  */
@@ -741,7 +778,16 @@ function resolveBestSet(
       const cNoDigits = c.replace(/\d+/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
 
       for (const pattern of set.targets) {
-const p = pattern.toLowerCase().trim();
+        const p = pattern.toLowerCase().trim();
+
+        // Reject matching dark candidate to light pattern or vice-versa
+        const cHasDark = c.includes('dark');
+        const cHasLight = c.includes('light');
+        const pHasDark = p.includes('dark');
+        const pHasLight = p.includes('light');
+        if ((cHasDark && pHasLight) || (cHasLight && pHasDark)) {
+          continue;
+        }
 
         const pNoDigits = p.replace(/\d+/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
 
@@ -1119,10 +1165,13 @@ const fbx = useMemo(() => {
           });
         }
 
+        const detectedColor = detectColorFromNames([m?.name, mesh.name]);
+
         const originalColor =
-          (m as any).color
+          detectedColor ||
+          ((m as any).color
             ? (m as any).color.clone()
-            : new THREE.Color(0xffffff);
+            : new THREE.Color(0xffffff));
 
         const pbr = new THREE.MeshStandardMaterial({
           name:
@@ -1843,12 +1892,36 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
 
         // ── 3. Base color / albedo ─────────────────────────────────────────
         const baseColorTex = tex(getValidMappingUrl(settings.materialMappings?.[mat.name])) ?? tex(set?.baseColor);
+        const colorFromNames = detectColorFromNames([
+          mesh.name,
+          mat.name,
+          set?.id,
+          set?.baseColor,
+          ...(set?.targets || []),
+          settings.materialMappings?.[mat.name],
+        ]);
+
         if (baseColorTex) { 
           mat.map = baseColorTex; 
-          mat.color.set(0xffffff); 
+          if (colorFromNames && (
+            (set?.baseColor && set.baseColor.toLowerCase().includes('dark')) ||
+            mat.name.toLowerCase().includes('dark') ||
+            mesh.name.toLowerCase().includes('dark') ||
+            (set?.baseColor && set.baseColor.toLowerCase().includes('light')) ||
+            mat.name.toLowerCase().includes('light') ||
+            mesh.name.toLowerCase().includes('light')
+          )) {
+            mat.color.copy(colorFromNames);
+          } else {
+            mat.color.set(0xffffff); 
+          }
         } else { 
           mat.map = mat.userData.originalMap || null; 
-          mat.color.copy(mat.userData.originalColor || new THREE.Color(0xffffff)); 
+          if (colorFromNames) {
+            mat.color.copy(colorFromNames);
+          } else {
+            mat.color.copy(mat.userData.originalColor || new THREE.Color(0xffffff)); 
+          }
         }
 
         // ── 4. Normal ──────────────────────────────────────────────────────
@@ -1877,29 +1950,35 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
           meshUsesAlphaByUv(mesh, alphaTex)
         );
 
-        mat.opacity = 1.0;
+        mat.opacity = settings.opacity !== undefined ? settings.opacity : 1.0;
         mat.alphaTest = 0;
         mat.alphaHash = false;
         mat.depthTest = true;
         mat.premultipliedAlpha = false;
 
-        if (usesAlpha && alphaTex) {
-          // The mesh's OWN UVs actually sample a non-opaque region.
-          mat.alphaMap = alphaTex;
-          mat.transparent = true;
-          mat.depthWrite = false;
+        const isTransparent = !!((usesAlpha && alphaTex) || settings.transparent || (settings.opacity !== undefined && settings.opacity < 1.0));
 
+        if (isTransparent) {
+          // The mesh uses transparency / opacity map.
+          if (alphaTex && usesAlpha) {
+            mat.alphaMap = alphaTex;
+          }
+          mat.transparent = true;
+          mat.alphaTest = 0.02; // Discard near-zero opacity fragments
+          mat.depthWrite = true; // Enable depth write so front-faces write to depth buffer and block back-faces / distant Z-fighting flickering
+          mat.polygonOffset = true;
+          mat.polygonOffsetFactor = 1;
+          mat.polygonOffsetUnits = 1;
 
           // Stable for thin transparent surfaces from either viewing side.
           mat.side = THREE.DoubleSide;
-          (mat as any).forceSinglePass = true;
+          (mat as any).forceSinglePass = false;
 
           console.log('[REAL ALPHA - UV VERIFIED]', {
             mesh: mesh.name,
             material: mat.name,
             materialUUID: mat.uuid,
-            alphaUUID: alphaTex.uuid,
-            uvAlpha: analyzeMeshUvAgainstAlpha(mesh, alphaTex),
+            alphaUUID: alphaTex?.uuid,
             hasBaseColor: !!mat.map,
             baseColorUUID: mat.map?.uuid,
             color: mat.color.getHexString(),
@@ -2070,6 +2149,12 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
           sm.name = mat.name;
           sm.userData = { ...mat.userData };
           sm.userData.isPBR = true;
+
+          const detectedColor = detectColorFromNames([mesh.name, mat.name]);
+          if (detectedColor) {
+            sm.color.copy(detectedColor);
+          }
+
           if (!sm.userData.originalMap) sm.userData.originalMap = sm.map;
           if (!sm.userData.originalColor) sm.userData.originalColor = sm.color.clone();
           if (sm.userData.originalOpacity === undefined) sm.userData.originalOpacity = sm.opacity;
@@ -2092,47 +2177,120 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
 
   // ── Hotspots ──────────────────────────────────────────────────────────────
   const hotspots = useMemo(() => {
-    if (!fbx) return [];
+    if (!fbx || !modelParts || modelParts.length === 0) return [];
     const detected: { id: string, mesh: THREE.Mesh, description: string, name: string }[] = [];
     fbx.updateMatrixWorld(true);
-    const modelBox = new THREE.Box3().setFromObject(fbx);
-    const modelSize = new THREE.Vector3(); modelBox.getSize(modelSize);
-    const maxDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
+
+    const meshes: THREE.Mesh[] = [];
     fbx.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
-        const mesh = child as THREE.Mesh;
-        const partInfo = modelParts.find(p => {
-          if (p.presentAtSite === false) return false;
+        meshes.push(child as THREE.Mesh);
+      }
+    });
+
+    if (meshes.length === 0) return [];
+
+    const isPartPresent = (p: any) => {
+      if (!p) return false;
+      const val = p.presentAtSite ?? p.PresentAtSite ?? p.displayInSite ?? p.DisplayInSite ?? p.present_at_site ?? p.display_in_site ?? p.present ?? p.Present ?? p.inSite ?? p.InSite ?? p.isPresent ?? p.IsPresent;
+      if (val === undefined || val === null) return false;
+      if (typeof val === 'boolean') return val;
+      if (typeof val === 'number') return val > 0;
+      if (typeof val === 'string') {
+        const s = val.trim().toLowerCase();
+        if (s === '' || s === 'false' || s === '0' || s === 'no' || s === 'none' || s === 'null' || s === 'undefined' || s === 'off' || s === 'לא' || s === 'אין' || s === 'לא קיים' || s === 'חסר' || s === 'n') return false;
+        return true;
+      }
+      return Boolean(val);
+    };
+
+    const activeParts = modelParts.filter(p => isPartPresent(p));
+    const usedMeshSet = new Set<THREE.Mesh>();
+
+    activeParts.forEach((p, idx) => {
+      const pNameLower = (p.partName || '').toLowerCase().trim();
+      const pKeyLower = (p.partKey || '').toLowerCase().trim();
+      const pDispLower = (p.display_name || p.displayName || '').toLowerCase().trim();
+      const pEnLower = (p.display_name_en || p.displayName_en || p.partName_en || '').toLowerCase().trim();
+      const pHeLower = (p.display_name_he || p.displayName_he || p.partName_he || '').toLowerCase().trim();
+      const pIdLower = String(p.id || '').toLowerCase().trim();
+
+      const norm = (s: string) => s.replace(/[^a-z0-9]/gi, '').toLowerCase();
+      const pNameNorm = norm(pNameLower);
+      const pKeyNorm = norm(pKeyLower);
+      const pDispNorm = norm(pDispLower);
+
+      let matchedMesh = meshes.find((mesh) => {
+        if (usedMeshSet.has(mesh)) return false;
+        const meshNameLower = mesh.name.toLowerCase().trim();
+        if (!meshNameLower) return false;
+        const meshNorm = norm(meshNameLower);
+
+        const keyMatch = pKeyLower !== '' && (meshNameLower.includes(pKeyLower) || pKeyLower.includes(meshNameLower) || (pKeyNorm !== '' && (meshNorm.includes(pKeyNorm) || pKeyNorm.includes(meshNorm))));
+        const nameMatch = pNameLower !== '' && (meshNameLower.includes(pNameLower) || pNameLower.includes(meshNameLower) || (pNameNorm !== '' && (meshNorm.includes(pNameNorm) || pNameNorm.includes(meshNorm))));
+        const dispMatch = pDispLower !== '' && (meshNameLower.includes(pDispLower) || pDispLower.includes(meshNameLower) || (pDispNorm !== '' && (meshNorm.includes(pDispNorm) || pDispNorm.includes(meshNorm))));
+        const enMatch = pEnLower !== '' && (meshNameLower.includes(pEnLower) || pEnLower.includes(meshNameLower));
+        const heMatch = pHeLower !== '' && (meshNameLower.includes(pHeLower) || pHeLower.includes(meshNameLower));
+        const idMatch = pIdLower !== '' && meshNameLower === pIdLower;
+
+        return keyMatch || nameMatch || dispMatch || enMatch || heMatch || idMatch;
+      });
+
+      if (!matchedMesh) {
+        matchedMesh = meshes.find((mesh) => {
           const meshNameLower = mesh.name.toLowerCase().trim();
-          const pNameLower = p.partName.toLowerCase().trim();
-          const pKeyLower = (p.partKey || "").toLowerCase().trim();
-          
-          return (
-            (pNameLower !== "" && (meshNameLower === pNameLower || meshNameLower.includes(pNameLower))) ||
-            (pKeyLower !== "" && (meshNameLower === pKeyLower || meshNameLower.includes(pKeyLower)))
-          );
+          if (!meshNameLower) return false;
+          const meshNorm = norm(meshNameLower);
+
+          const keyMatch = pKeyLower !== '' && (meshNameLower.includes(pKeyLower) || pKeyLower.includes(meshNameLower) || (pKeyNorm !== '' && (meshNorm.includes(pKeyNorm) || pKeyNorm.includes(meshNorm))));
+          const nameMatch = pNameLower !== '' && (meshNameLower.includes(pNameLower) || pNameLower.includes(meshNameLower) || (pNameNorm !== '' && (meshNorm.includes(pNameNorm) || pNameNorm.includes(meshNorm))));
+          const dispMatch = pDispLower !== '' && (meshNameLower.includes(pDispLower) || pDispLower.includes(meshNameLower) || (pDispNorm !== '' && (meshNorm.includes(pDispNorm) || pDispNorm.includes(meshNorm))));
+          const enMatch = pEnLower !== '' && (meshNameLower.includes(pEnLower) || pEnLower.includes(meshNameLower));
+          const heMatch = pHeLower !== '' && (meshNameLower.includes(pHeLower) || pHeLower.includes(meshNameLower));
+          const idMatch = pIdLower !== '' && meshNameLower === pIdLower;
+
+          return keyMatch || nameMatch || dispMatch || enMatch || heMatch || idMatch;
         });
-        if (partInfo?.description) {
-          const tr = translatedParts[partInfo.id];
-          detected.push({ id: partInfo.id, mesh, description: tr?.description || partInfo.description, name: tr?.name || mesh.name });
+      }
+
+      if (!matchedMesh) {
+        const pWords = `${pNameLower} ${pKeyLower} ${pDispLower}`.split(/[^a-z0-9]+/).filter(w => w.length > 2);
+        if (pWords.length > 0) {
+          matchedMesh = meshes.find((mesh) => {
+            const meshWords = mesh.name.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2);
+            return pWords.some(pw => meshWords.some(mw => mw === pw || mw.includes(pw) || pw.includes(mw)));
+          });
+        }
+      }
+
+      // Fallback for active DB parts (presentAtSite === true) when FBX mesh names are generic or mismatched
+      if (!matchedMesh) {
+        matchedMesh = meshes.find(m => !usedMeshSet.has(m)) || meshes[idx % meshes.length];
+      }
+
+      if (matchedMesh) {
+        usedMeshSet.add(matchedMesh);
+        const tr = translatedParts[p.id];
+        const name = tr?.name || p.display_name || p.partName || 'Part';
+        const description = tr?.description || p.description || '';
+        if (!detected.some(d => d.id === p.id)) {
+          detected.push({ id: p.id, mesh: matchedMesh, description, name });
         }
       }
     });
+
     detected.sort((a, b) => {
       const ab = new THREE.Box3().setFromObject(a.mesh); const bb = new THREE.Box3().setFromObject(b.mesh);
       const ac = new THREE.Vector3(); const bc = new THREE.Vector3();
       ab.getCenter(ac); bb.getCenter(bc); return ac.x - bc.x;
     });
-    const topY = modelSize.y * 0.5 + maxDim * 0.12;
-    const startX = -modelSize.x * 0.3; const endX = modelSize.x * 0.3;
-    const stepX = detected.length > 1 ? (endX - startX) / (detected.length - 1) : 0;
-    return detected.map((part, i) => {
-      const pointPos = new THREE.Vector3(startX + i * stepX, topY, 0);
+
+    return detected.map((part) => {
       const mb = new THREE.Box3().setFromObject(part.mesh);
       const mc = new THREE.Vector3(); const ms = new THREE.Vector3();
       mb.getCenter(mc); mb.getSize(ms);
       const lc = fbx.worldToLocal(mc.clone());
-      return { id: part.id, mesh: part.mesh, anchorPosition: lc, pointPosition: pointPos, description: part.description, partName: part.name, size: ms };
+      return { id: part.id, mesh: part.mesh, anchorPosition: lc, description: part.description, partName: part.name, size: ms };
     });
   }, [fbx, modelParts, translatedParts]);
 
@@ -2282,10 +2440,11 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
 
   return (
     <group ref={outerGroupRef}>
-<primitive key={url} object={fbx} />      {hotspots.map((hs) => (
+      <primitive key={url} object={fbx} />
+      {hotspots.map((hs) => (
         <group key={hs.id} position={hs.anchorPosition}>
-          <Html distanceFactor={15}>
-            <div className="relative">
+          <Html distanceFactor={25} center zIndexRange={[100, 0]}>
+            <div className="relative group/hotspot pointer-events-auto flex flex-col items-center">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -2297,10 +2456,15 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
                     });
                   }
                 }}
-                className={`w-6 h-6 sm:w-8 sm:h-8 rounded-full border-2 border-white shadow-2xl transition-all duration-300 transform hover:scale-110 ${
-                  activePartId === hs.id ? 'bg-yellow-500 ring-[8px] ring-yellow-500/30 scale-110' : 'bg-yellow-600'
+                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 border-white shadow-2xl transition-all duration-300 transform hover:scale-125 flex items-center justify-center cursor-pointer ${
+                  activePartId === hs.id 
+                    ? 'bg-yellow-500 ring-8 ring-yellow-500/40 scale-110 shadow-yellow-500/50' 
+                    : 'bg-yellow-600 hover:bg-yellow-500 shadow-black/30'
                 }`}
-              />
+                title={hs.partName}
+              >
+                <div className="w-2.5 h-2.5 rounded-full bg-white shadow-md animate-pulse" />
+              </button>
             </div>
           </Html>
         </group>

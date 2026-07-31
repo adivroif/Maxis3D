@@ -629,9 +629,29 @@ const defaultElsaParts = [
 
 function initializePartsCache() {
   try {
-    const cacheData: any = {};
+    let cacheData: any = {};
+    if (fs.existsSync(cacheFilePath)) {
+      try {
+        cacheData = JSON.parse(fs.readFileSync(cacheFilePath, "utf-8"));
+      } catch (e) {
+        cacheData = {};
+      }
+    }
+    const seeds: Record<string, any[]> = {
+      "axe": defaultAxeParts,
+      "pipe": defaultPipeParts,
+      "chest": defaultChestParts,
+      "elsa": defaultElsaParts,
+      "elsa 2 caliper guide pin 35x144mm": defaultElsaParts,
+      "guide pin with bolt for elsa 2 caliper kit": defaultElsaParts,
+    };
+    for (const [k, v] of Object.entries(seeds)) {
+      if (!cacheData[k] || cacheData[k].length === 0) {
+        cacheData[k] = v;
+      }
+    }
     fs.writeFileSync(cacheFilePath, JSON.stringify(cacheData, null, 2), "utf-8");
-    console.log("✅ Model parts cache initialized and cleared of mock seeds.");
+    console.log("✅ Model parts cache initialized with seed fallbacks.");
   } catch (err) {
     console.error("⚠️ Failed to initialize parts cache:", err);
   }
@@ -641,11 +661,22 @@ function getCachedParts(modelName: string) {
   try {
     if (fs.existsSync(cacheFilePath)) {
       const cacheData = JSON.parse(fs.readFileSync(cacheFilePath, "utf-8"));
-      // Match direct modelName or case-insensitive name without extension
+      const cleanModel = modelName.toLowerCase().replace(/\.[^/.]+$/, "").trim();
       const keys = Object.keys(cacheData);
-      const matchedKey = keys.find(k => k.toLowerCase() === modelName.toLowerCase() || k.toLowerCase() === modelName.toLowerCase().replace(/\.[^/.]+$/, ""));
-      if (matchedKey) {
-        console.log(`[Cache Hit] Loaded parts for '${modelName}' from local model_parts_cache.json (key: '${matchedKey}')`);
+
+      // 1. Exact match (case-insensitive)
+      let matchedKey = keys.find(k => k.toLowerCase().trim() === cleanModel);
+
+      // 2. Contains match
+      if (!matchedKey) {
+        matchedKey = keys.find(k => {
+          const kClean = k.toLowerCase().trim();
+          return kClean.includes(cleanModel) || cleanModel.includes(kClean);
+        });
+      }
+
+      if (matchedKey && cacheData[matchedKey] && cacheData[matchedKey].length > 0) {
+        console.log(`[Cache Hit] Loaded ${cacheData[matchedKey].length} parts for '${modelName}' from local model_parts_cache.json (key: '${matchedKey}')`);
         return cacheData[matchedKey];
       }
     }
@@ -659,12 +690,18 @@ function saveCachedParts(modelName: string, parts: any[]) {
   try {
     let cacheData: any = {};
     if (fs.existsSync(cacheFilePath)) {
-      cacheData = JSON.parse(fs.readFileSync(cacheFilePath, "utf-8"));
+      try {
+        cacheData = JSON.parse(fs.readFileSync(cacheFilePath, "utf-8"));
+      } catch (e) {}
     }
-    const cleanKey = modelName.replace(/\.[^/.]+$/, "");
-    cacheData[cleanKey] = parts;
-    fs.writeFileSync(cacheFilePath, JSON.stringify(cacheData, null, 2), "utf-8");
-    console.log(`[Cache Sync] Saved parts for '${modelName}' to local model_parts_cache.json`);
+    const cleanKey = modelName.replace(/\.[^/.]+$/, "").toLowerCase().trim();
+    if (parts && parts.length > 0) {
+      cacheData[cleanKey] = parts;
+      fs.writeFileSync(cacheFilePath, JSON.stringify(cacheData, null, 2), "utf-8");
+      console.log(`[Cache Sync] Saved ${parts.length} parts for '${modelName}' to local model_parts_cache.json`);
+    } else {
+      console.log(`[Cache Sync] Received empty parts for '${modelName}', keeping existing cache if present.`);
+    }
   } catch (err) {
     console.error("Failed to save parts cache:", err);
   }
@@ -761,12 +798,36 @@ async function startServer() {
           const rawParts = Array.isArray(data) ? data : (data.parts || data.data || data.items || []);
           
           const parts = rawParts.map((item: any) => ({
-            id: (item.partId || item.PartId || Math.random().toString(36).substr(2, 9)).toString(),
+            id: (item.partId || item.PartId || item.id || item.Id || Math.random().toString(36).substr(2, 9)).toString(),
             modelName: name,
             partName: item.displayName || item.display_name || item.partName || item.PartName || item.partKey || item.PartKey || "Unnamed Part",
             partKey: item.partKey || item.PartKey || "",
             description: item.description || item.Description || "",
-            presentAtSite: item.presentAtSite ?? item.PresentAtSite ?? true // Default to true if not provided by API
+            display_name: item.display_name || item.Display_name || item.displayName || item.DisplayName || undefined,
+            display_name_he: item.display_name_he || item.Display_name_he || item.display_name_HE || item.Display_name_HE || item.DisplayNameHe || item.displayNameHe || item.displayName_he || item.DisplayName_he || undefined,
+            display_name_en: item.display_name_en || item.Display_name_en || item.display_name_EN || item.Display_name_EN || item.DisplayNameEn || item.displayNameEn || item.displayName_en || item.DisplayName_en || undefined,
+            display_name_ru: item.display_name_ru || item.Display_name_ru || item.display_name_RU || item.Display_name_RU || item.DisplayNameRu || item.displayNameRu || item.displayName_ru || item.DisplayName_ru || undefined,
+            display_name_ar: item.display_name_ar || item.Display_name_ar || item.display_name_AR || item.Display_name_AR || item.DisplayNameAr || item.displayNameAr || item.display_name_ar || item.DisplayName_ar || undefined,
+            description_he: item.description_he || item.Description_he || item.description_HE || item.Description_HE || item.DescriptionHe || item.descriptionHe || undefined,
+            description_en: item.description_en || item.Description_en || item.description_EN || item.Description_EN || item.DescriptionEn || item.descriptionEn || undefined,
+            description_ru: item.description_ru || item.Description_ru || item.description_RU || item.Description_RU || item.DescriptionRu || item.descriptionRu || undefined,
+            description_ar: item.description_ar || item.Description_ar || item.description_AR || item.Description_AR || item.DescriptionAr || item.descriptionAr || undefined,
+            partName_he: item.partName_he || item.PartName_he || item.partName_HE || item.PartName_HE || item.PartNameHe || item.partNameHe || undefined,
+            partName_en: item.partName_en || item.PartName_en || item.partName_EN || item.PartName_EN || item.PartNameEn || item.partNameEn || undefined,
+            partName_ru: item.partName_ru || item.PartName_ru || item.partName_RU || item.PartName_RU || item.PartNameRu || item.partNameRu || undefined,
+            partName_ar: item.partName_ar || item.PartName_ar || item.partName_AR || item.PartName_AR || item.PartNameAr || item.partNameAr || undefined,
+            presentAtSite: (() => {
+              const raw = item.presentAtSite ?? item.PresentAtSite ?? item.present_at_site ?? item.Present_at_site ?? item.displayInSite ?? item.DisplayInSite ?? item.display_in_site ?? item.Display_in_site ?? item.present ?? item.Present ?? item.inSite ?? item.InSite ?? item.isPresent ?? item.IsPresent;
+              if (raw === undefined || raw === null) return false;
+              if (typeof raw === 'boolean') return raw;
+              if (typeof raw === 'number') return raw > 0;
+              if (typeof raw === 'string') {
+                const s = raw.trim().toLowerCase();
+                if (s === '' || s === 'false' || s === '0' || s === 'no' || s === 'none' || s === 'null' || s === 'undefined' || s === 'off' || s === 'לא' || s === 'אין' || s === 'לא קיים' || s === 'חסר' || s === 'n') return false;
+                return true;
+              }
+              return Boolean(raw);
+            })()
           }));
 
           // Sync successful response to our local file cache (even if parts is empty, because that is what is in the DB)
@@ -804,10 +865,13 @@ async function startServer() {
       // Use strictly the modelName (usually the filename) for the parts lookup with a robust timeout
       let parts = await tryFetchParts(modelName, 15000, 2, !hasCache);
 
-      // FALLBACK: Only serve cached backup if primary API request failed entirely (returned null)
-      if (parts === null) {
-        console.log(`Fetch failed from API, checking cached backup for model: ${modelName}`);
-        parts = getCachedParts(modelName);
+      // FALLBACK: Serve cached backup if primary API request failed or returned no parts
+      if (!parts || parts.length === 0) {
+        console.log(`Fetch returned empty/null from API, checking cached backup for model: ${modelName}`);
+        const fallbackParts = getCachedParts(modelName);
+        if (fallbackParts && fallbackParts.length > 0) {
+          parts = fallbackParts;
+        }
       }
 
       if (parts) {

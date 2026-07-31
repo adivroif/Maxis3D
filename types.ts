@@ -111,5 +111,23 @@ export interface ModelPart {
   partName: string;
   partKey: string;
   description: string;
+  description_he?: string;
+  description_en?: string;
+  description_ru?: string;
+  description_ar?: string;
+  partName_he?: string;
+  partName_en?: string;
+  partName_ru?: string;
+  partName_ar?: string;
+  display_name?: string;
+  displayName?: string;
+  display_name_he?: string;
+  display_name_en?: string;
+  display_name_ru?: string;
+  display_name_ar?: string;
+  displayName_he?: string;
+  displayName_en?: string;
+  displayName_ru?: string;
+  displayName_ar?: string;
   presentAtSite?: boolean;
 }

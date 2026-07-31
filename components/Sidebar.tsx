@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { SceneModelInstance } from '../types';
 import { Language, translations } from '../src/translations';
 import { translateText } from '../services/ttsService';
+import { getLocalizedProductData } from '../App';
 
 interface SidebarProps {
   models: SceneModelInstance[];
@@ -34,6 +35,79 @@ const cleanEscapedQuotes = (str: string): string => {
   // Convert all actual newline characters to <br /> tags for HTML rendering
   cleaned = cleaned.replace(/\r\n/g, '<br />').replace(/\n/g, '<br />');
   return cleaned;
+};
+
+const getLocalizedCategoryFromItem = (item: any, lang: Language): string => {
+  if (!item) return '';
+  let val = '';
+  if (lang === 'he') val = item.categoryName_he || item.CategoryName_he || item.categoryName_HE || item.productCategory_he || item.category_he || '';
+  else if (lang === 'en') val = item.categoryName_en || item.CategoryName_en || item.categoryName_EN || item.productCategory_en || item.category_en || '';
+  else if (lang === 'ru') val = item.categoryName_ru || item.CategoryName_ru || item.categoryName_RU || item.productCategory_ru || item.category_ru || '';
+  else if (lang === 'ar') val = item.categoryName_ar || item.CategoryName_ar || item.categoryName_AR || item.productCategory_ar || item.category_ar || '';
+
+  if (!val || val.trim() === '') {
+    val = item.categoryName_he || item.CategoryName_he || item.categoryName_en || item.CategoryName_en || item.categoryName_ru || item.categoryName_ar || item.categoryName || item.CategoryName || item.productCategory || item.ProductCategory || item.category || item.Category || item.name || item.title || '';
+  }
+  return cleanEscapedQuotes(val);
+};
+
+const getLocalizedSubCategoryFromItem = (item: any, lang: Language): string => {
+  if (!item) return '';
+  let val = '';
+  if (lang === 'he') val = item.subCategory_he || item.SubCategory_he || item.subCategory_HE || item.productSubCategory_he || item.subcategory_he || '';
+  else if (lang === 'en') val = item.subCategory_en || item.SubCategory_en || item.subCategory_EN || item.productSubCategory_en || item.subcategory_en || '';
+  else if (lang === 'ru') val = item.subCategory_ru || item.SubCategory_ru || item.subCategory_RU || item.productSubCategory_ru || item.subcategory_ru || '';
+  else if (lang === 'ar') val = item.subCategory_ar || item.SubCategory_ar || item.subCategory_AR || item.productSubCategory_ar || item.subcategory_ar || '';
+
+  if (!val || val.trim() === '') {
+    val = item.subCategory_he || item.SubCategory_he || item.subCategory_en || item.subCategory_ru || item.subCategory_ar || item.subCategory || item.SubCategory || item.productSubCategory || item.ProductSubCategory || item.subcategory || item.Subcategory || '';
+  }
+  return cleanEscapedQuotes(val);
+};
+
+const getCategoryPrimaryTitle = (c: any): string => {
+  if (!c) return '';
+  return (
+    c.categoryName_he ||
+    c.CategoryName_he ||
+    c.categoryName_en ||
+    c.CategoryName_en ||
+    c.categoryName_ar ||
+    c.CategoryName_ar ||
+    c.categoryName_ru ||
+    c.CategoryName_ru ||
+    c.categoryName ||
+    c.CategoryName ||
+    c.productCategory ||
+    c.ProductCategory ||
+    c.category ||
+    c.Category ||
+    c.name ||
+    c.title ||
+    c.categoryId ||
+    ''
+  ).toString().trim();
+};
+
+const matchApiCategory = (catStr: string, apiCats: any[]) => {
+  if (!catStr || !apiCats || apiCats.length === 0) return undefined;
+  const low = catStr.trim().toLowerCase();
+  return apiCats.find(c => {
+    const id = (c.categoryId || c.id || '').toString().toLowerCase();
+    const nameHe = (c.categoryName_he || c.CategoryName_he || '').toString().toLowerCase();
+    const nameEn = (c.categoryName_en || c.CategoryName_en || '').toString().toLowerCase();
+    const nameAr = (c.categoryName_ar || c.CategoryName_ar || '').toString().toLowerCase();
+    const nameRu = (c.categoryName_ru || c.CategoryName_ru || '').toString().toLowerCase();
+    const nameGen = (c.categoryName || c.CategoryName || c.name || c.title || '').toString().toLowerCase();
+    return (
+      id === low ||
+      (nameHe && nameHe === low) ||
+      (nameEn && nameEn === low) ||
+      (nameAr && nameAr === low) ||
+      (nameRu && nameRu === low) ||
+      (nameGen && nameGen === low)
+    );
+  });
 };
 
 const stripHtmlTags = (str: string): string => {
@@ -105,6 +179,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [productTitles, setProductTitles] = React.useState<Record<string, string>>({});
   const [apiCategories, setApiCategories] = React.useState<any[]>([]);
   const [displayStatus, setDisplayStatus] = React.useState<Record<string, boolean>>({});
+  const [rawProductsMap, setRawProductsMap] = React.useState<Record<string, any>>({});
   const [productToCategory, setProductToCategory] = React.useState<Record<string, string>>({});
   const [productToSubCategory, setProductToSubCategory] = React.useState<Record<string, string>>({});
   const [translatedModels, setTranslatedModels] = React.useState<Record<string, { name: string, description: string }>>({});
@@ -285,6 +360,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           if (data) {
             const result = Array.isArray(data) ? data[0] : data;
             if (result) {
+              setRawProductsMap(prev => ({ ...prev, [normalizedName]: result }));
               const apiTitle = cleanEscapedQuotes(result.productDisplayTitle || result.productTitle || result.title || result.name || '');
               const productTitleVal = cleanEscapedQuotes(result.productTitle || result.title || result.name || '');
               const desc = cleanEscapedQuotes(result.productDescription || result.description || '');
@@ -325,33 +401,29 @@ const Sidebar: React.FC<SidebarProps> = ({
                 setProductToSubCategory(prev => ({ ...prev, [normalizedName]: subCategory }));
               }
               
-              // Handle displayInSite flag (Handle boolean, string, or number)
+              // Handle displayInSite flag (Handle boolean, string, or number - default to true unless explicitly false)
               const rawDisplay = result.displayInSite ?? result.DisplayInSite;
-              const display = rawDisplay === true || 
-                            rawDisplay === 1 || 
-                            String(rawDisplay).toLowerCase() === 'true';
+              const display = (rawDisplay === false || rawDisplay === 0 || String(rawDisplay).toLowerCase() === 'false') ? false : true;
               
               setDisplayStatus(prev => ({ ...prev, [normalizedName]: display }));
             } else {
-              // Product found but empty - hide by default
-              setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
+              setDisplayStatus(prev => ({ ...prev, [normalizedName]: true }));
             }
           }
         } catch (jsonErr) {
           console.warn("Failed to parse product JSON:", jsonErr);
-          setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
+          setDisplayStatus(prev => ({ ...prev, [normalizedName]: true }));
         }
       } else if (res.status === 404) {
-        // Product not found in DB - Hide by default
-        console.log(`Product ${productName} not found in DB, hiding.`);
-        setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
+        // Product not found in DB - Keep visible by default
+        setDisplayStatus(prev => ({ ...prev, [normalizedName]: true }));
       } else {
-        // Error case - Hide by default
-        setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
+        // Error case - Keep visible by default
+        setDisplayStatus(prev => ({ ...prev, [normalizedName]: true }));
       }
     } catch (err) {
       console.warn("Fetch error for product:", err);
-      setDisplayStatus(prev => ({ ...prev, [normalizedName]: false }));
+      setDisplayStatus(prev => ({ ...prev, [normalizedName]: true }));
     }
   };
 
@@ -480,54 +552,92 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   React.useEffect(() => {
     const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
-    
+    const langCode = language;
+
     const translateModelInfo = async () => {
       const filesToTranslate = [...r2Files];
       if (filesToTranslate.length === 0) return;
 
+      const newTranslations: Record<string, { name: string, description: string }> = {};
       const itemsToTranslate: string[] = [];
-      const mapping: { name: string; desc: string; normalized: string }[] = [];
+      const mapping: { normalized: string; titleNeedsTrans: boolean; descNeedsTrans: boolean; origTitle: string; origDesc: string }[] = [];
 
       filesToTranslate.forEach(file => {
         const originalDisplayName = file.name.replace(/\.fbx$/i, '');
         const normalizedName = originalDisplayName.trim().toLowerCase();
-        const apiName = apiTitles[normalizedName] || originalDisplayName;
-        const description = descriptions[normalizedName] || '';
         
-        itemsToTranslate.push(apiName);
-        if (description) itemsToTranslate.push(description);
-        
-        mapping.push({ name: apiName, desc: description, normalized: normalizedName });
+        const rawProduct = rawProductsMap[normalizedName];
+        let titleToUse = '';
+        let descToUse = '';
+        let isExplicitTitle = false;
+        let isExplicitDesc = false;
+
+        if (rawProduct) {
+          const localized = getLocalizedProductData(rawProduct, language);
+          titleToUse = localized.title;
+          descToUse = localized.description;
+          isExplicitTitle = localized.isExplicitTitle;
+          isExplicitDesc = localized.isExplicitDesc;
+        }
+
+        if (!titleToUse) {
+          const cleanFileName = originalDisplayName.replace(/_/g, ' ').replace(/-/g, ' ');
+          titleToUse = apiTitles[normalizedName] || cleanFileName;
+        }
+
+        if (!descToUse) {
+          descToUse = descriptions[normalizedName] || '';
+        }
+
+        let titleNeedsTrans = !isExplicitTitle && langCode !== 'en';
+        let descNeedsTrans = !isExplicitDesc && Boolean(descToUse) && langCode !== 'en';
+
+        // Set initial state immediately
+        newTranslations[normalizedName] = { name: titleToUse, description: descToUse };
+
+        if (titleNeedsTrans || descNeedsTrans) {
+          mapping.push({
+            normalized: normalizedName,
+            titleNeedsTrans,
+            descNeedsTrans,
+            origTitle: titleToUse,
+            origDesc: descToUse
+          });
+          if (titleNeedsTrans) itemsToTranslate.push(titleToUse);
+          if (descNeedsTrans) itemsToTranslate.push(descToUse);
+        }
       });
 
-      try {
-        const { translateBatch } = await import('../services/ttsService');
-        const translatedResults = await translateBatch(itemsToTranslate, langName);
-        
-        const newTranslations: Record<string, { name: string, description: string }> = {};
-        let resultIdx = 0;
-        
-        mapping.forEach(item => {
-          const tName = translatedResults[resultIdx++];
-          const tDesc = item.desc ? translatedResults[resultIdx++] : '';
-          newTranslations[item.normalized] = { name: tName, description: tDesc };
-        });
+      setTranslatedModels(newTranslations);
 
-        setTranslatedModels(newTranslations);
-      } catch (err) {
-        console.error("Failed to translate model info:", err);
+      if (itemsToTranslate.length > 0) {
+        try {
+          const { translateBatch } = await import('../services/ttsService');
+          const translatedResults = await translateBatch(itemsToTranslate, langName);
+          
+          let resultIdx = 0;
+          const updatedTranslations = { ...newTranslations };
+          mapping.forEach(item => {
+            const tName = item.titleNeedsTrans ? (translatedResults[resultIdx++] || item.origTitle) : item.origTitle;
+            const tDesc = item.descNeedsTrans ? (translatedResults[resultIdx++] || item.origDesc) : item.origDesc;
+            updatedTranslations[item.normalized] = { name: tName, description: tDesc };
+          });
+          setTranslatedModels(updatedTranslations);
+        } catch (err) {
+          console.error("Failed to translate model info:", err);
+        }
       }
     };
 
     translateModelInfo();
-  }, [language, r2Files, descriptions, apiTitles]);
+  }, [language, r2Files, descriptions, apiTitles, rawProductsMap]);
 
   const visibleFiles = React.useMemo(() => {
     return r2Files.filter(file => {
       const displayName = file.name.replace(/\.fbx$/i, '');
       const normalizedName = displayName.trim().toLowerCase();
-      // Strictly show only those set to true
-      return displayStatus[normalizedName] === true;
+      // Show model unless explicitly set to false
+      return displayStatus[normalizedName] !== false;
     });
   }, [r2Files, displayStatus]);
 
@@ -535,38 +645,42 @@ const Sidebar: React.FC<SidebarProps> = ({
   const categories = React.useMemo(() => {
     const groups: Record<string, any[]> = {};
     
-    // Create a set of valid category titles from API for easier matching
-    const apiCategoryTitles = apiCategories.map(c => (c.categoryName || c.name || c.title || '').toString().toLowerCase());
+    // First, populate groups with all categories from apiCategories (tenantA)
+    apiCategories.forEach(c => {
+      const primaryName = getCategoryPrimaryTitle(c);
+      if (primaryName && !groups[primaryName]) {
+        groups[primaryName] = [];
+      }
+    });
     
     visibleFiles.forEach(file => {
       const originalDisplayName = file.name.replace(/\.fbx$/i, '');
       const normalizedName = originalDisplayName.trim().toLowerCase();
       
       // Try to get category from product metadata
-      let category = productToCategory[normalizedName] || 'General';
+      let rawCat = productToCategory[normalizedName] || 'General';
       
-      // Validate that the category actually exists in our apiCategories list
-      // If it doesn't match exactly, we might want to check the folder fallback
-      const lowCategory = category.toLowerCase();
-      const matchedCategory = apiCategories.find(c => {
-        const name = (c.categoryName || c.name || c.title || '').toString().toLowerCase();
-        const id = (c.categoryId || c.id || '').toString().toLowerCase();
-        return name === lowCategory || id === lowCategory;
-      });
+      const matchedCategory = matchApiCategory(rawCat, apiCategories);
 
+      let category = '';
       if (matchedCategory) {
-        category = matchedCategory.categoryName || matchedCategory.name || matchedCategory.title || category;
+        category = getCategoryPrimaryTitle(matchedCategory) || rawCat;
       } else {
-        // Fallback to original folder grouping if no DB association found
-        const parts = file.key.split('/');
-        if (parts.length > 1) {
-          if (parts[0].toLowerCase() === 'files') {
-            category = parts.length > 2 ? parts[1] : 'General';
-          } else {
-            category = parts[0];
-          }
+        const existingKey = Object.keys(groups).find(k => k.toLowerCase() === rawCat.toLowerCase());
+        if (existingKey) {
+          category = existingKey;
         } else {
-          category = 'General';
+          // Fallback to original folder grouping if no DB association found
+          const parts = file.key.split('/');
+          if (parts.length > 1) {
+            if (parts[0].toLowerCase() === 'files') {
+              category = parts.length > 2 ? parts[1] : 'General';
+            } else {
+              category = parts[0];
+            }
+          } else {
+            category = 'General';
+          }
         }
       }
       
@@ -574,15 +688,15 @@ const Sidebar: React.FC<SidebarProps> = ({
       groups[category].push(file);
     });
 
-    // Only return categories that actually contain products (filter out empty/administrative categories like Tenants or Products)
-    const filteredGroups: Record<string, any[]> = {};
+    // Filter out categories with 0 items
+    const nonEmptyGroups: Record<string, any[]> = {};
     Object.entries(groups).forEach(([cat, files]) => {
       if (files.length > 0) {
-        filteredGroups[cat] = files;
+        nonEmptyGroups[cat] = files;
       }
     });
 
-    return filteredGroups;
+    return nonEmptyGroups;
   }, [visibleFiles, productToCategory, apiCategories]);
 
   React.useEffect(() => {
@@ -590,24 +704,21 @@ const Sidebar: React.FC<SidebarProps> = ({
   }, [selectedCategory]);
 
   const availableSubCategories = React.useMemo(() => {
-    if (selectedCategory === 'all') {
-      const subs = apiCategories
-        .map(c => c.subCategory || c.subcategory)
-        .filter(Boolean);
-      return Array.from(new Set(subs));
-    } else {
-      const subs = apiCategories
-        .filter(c => {
-          const name = (c.categoryName || c.name || c.title || '').toString().toLowerCase();
-          const id = (c.categoryId || c.id || '').toString().toLowerCase();
-          const selected = selectedCategory.toLowerCase();
-          return name === selected || id === selected;
-        })
-        .map(c => c.subCategory || c.subcategory)
-        .filter(Boolean);
-      return Array.from(new Set(subs));
+    let relevantCats = apiCategories;
+    if (selectedCategory !== 'all') {
+      relevantCats = apiCategories.filter(c => {
+        const primary = getCategoryPrimaryTitle(c);
+        const matched = matchApiCategory(selectedCategory, [c]);
+        return (primary && primary.toLowerCase() === selectedCategory.toLowerCase()) || !!matched;
+      });
     }
-  }, [selectedCategory, apiCategories]);
+
+    const subs = relevantCats
+      .map(c => getLocalizedSubCategoryFromItem(c, language) || c.subCategory_he || c.subCategory_en || c.subCategory || c.subcategory)
+      .filter(Boolean);
+
+    return Array.from(new Set(subs));
+  }, [selectedCategory, apiCategories, language]);
 
   React.useEffect(() => {
     const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
@@ -616,13 +727,53 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     const translateSubs = async () => {
       try {
-        const { translateBatch } = await import('../services/ttsService');
-        const translatedResults = await translateBatch(availableSubCategories, langName);
-        
         const newTranslations: Record<string, string> = {};
-        availableSubCategories.forEach((sub, idx) => {
-          newTranslations[sub] = translatedResults[idx] || sub;
+        const subsToTranslate: string[] = [];
+
+        availableSubCategories.forEach(sub => {
+          const matchApi = apiCategories.find(c => {
+            const sName = (c.subCategory || c.SubCategory || c.subcategory || c.subCategory_he || c.subCategory_en || c.subCategory_ar || c.subCategory_ru || '').toString().toLowerCase();
+            return sName === sub.toLowerCase();
+          });
+
+          if (matchApi) {
+            const locSub = getLocalizedSubCategoryFromItem(matchApi, language);
+            if (locSub) {
+              newTranslations[sub] = locSub;
+              return;
+            }
+          }
+
+          const matchingRawKey = Object.keys(rawProductsMap).find(k => {
+            const p = rawProductsMap[k];
+            const pSub = (p?.productSubCategory || p?.subCategory || p?.subcategory || '').toString().toLowerCase();
+            return pSub === sub.toLowerCase();
+          });
+
+          if (matchingRawKey) {
+            const p = rawProductsMap[matchingRawKey];
+            const locSub = getLocalizedSubCategoryFromItem(p, language);
+            if (locSub) {
+              newTranslations[sub] = locSub;
+              return;
+            }
+          }
+
+          subsToTranslate.push(sub);
         });
+
+        if (subsToTranslate.length > 0 && language !== 'en') {
+          const { translateBatch } = await import('../services/ttsService');
+          const translatedResults = await translateBatch(subsToTranslate, langName);
+          subsToTranslate.forEach((sub, idx) => {
+            newTranslations[sub] = translatedResults[idx] || sub;
+          });
+        } else {
+          subsToTranslate.forEach(sub => {
+            if (!newTranslations[sub]) newTranslations[sub] = sub;
+          });
+        }
+
         setTranslatedSubCategories(newTranslations);
       } catch (err) {
         console.error("Failed to translate subcategories:", err);
@@ -630,7 +781,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
 
     translateSubs();
-  }, [language, availableSubCategories]);
+  }, [language, availableSubCategories, apiCategories, rawProductsMap]);
 
   React.useEffect(() => {
     const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
@@ -640,13 +791,50 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     const translateCats = async () => {
       try {
-        const { translateBatch } = await import('../services/ttsService');
-        const translatedResults = await translateBatch(uniqueCategories, langName);
-        
         const newTranslations: Record<string, string> = {};
-        uniqueCategories.forEach((cat, idx) => {
-          newTranslations[cat] = translatedResults[idx] || cat;
+        const catsToTranslate: string[] = [];
+
+        uniqueCategories.forEach(cat => {
+          const matchApi = matchApiCategory(cat, apiCategories);
+
+          if (matchApi) {
+            const locCat = getLocalizedCategoryFromItem(matchApi, language);
+            if (locCat) {
+              newTranslations[cat] = locCat;
+              return;
+            }
+          }
+
+          const matchingRawKey = Object.keys(rawProductsMap).find(k => {
+            const p = rawProductsMap[k];
+            const pCat = (p?.productCategory || p?.categoryName || p?.category || '').toString().toLowerCase();
+            return pCat === cat.toLowerCase();
+          });
+
+          if (matchingRawKey) {
+            const p = rawProductsMap[matchingRawKey];
+            const locCat = getLocalizedCategoryFromItem(p, language);
+            if (locCat) {
+              newTranslations[cat] = locCat;
+              return;
+            }
+          }
+
+          catsToTranslate.push(cat);
         });
+
+        if (catsToTranslate.length > 0 && language !== 'en') {
+          const { translateBatch } = await import('../services/ttsService');
+          const translatedResults = await translateBatch(catsToTranslate, langName);
+          catsToTranslate.forEach((cat, idx) => {
+            newTranslations[cat] = translatedResults[idx] || cat;
+          });
+        } else {
+          catsToTranslate.forEach(cat => {
+            if (!newTranslations[cat]) newTranslations[cat] = cat;
+          });
+        }
+
         setTranslatedCategories(newTranslations);
       } catch (err) {
         console.error("Failed to translate categories:", err);
@@ -654,12 +842,18 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
 
     translateCats();
-  }, [language, categories]);
+  }, [language, categories, apiCategories, rawProductsMap]);
 
   const selectedModel = models.find(m => m.id === selectedId);
 
   const filteredProducts = React.useMemo(() => {
-    let base = selectedCategory === 'all' ? visibleFiles : (categories[selectedCategory] || []);
+    let base: any[] = [];
+    if (selectedCategory === 'all') {
+      base = visibleFiles;
+    } else {
+      const catKey = Object.keys(categories).find(k => k === selectedCategory || k.toLowerCase() === selectedCategory.toLowerCase());
+      base = catKey ? (categories[catKey] || []) : [];
+    }
     
     if (selectedSubCategory !== 'all') {
       base = base.filter(file => {
@@ -669,13 +863,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         let subCategory = productToSubCategory[normalizedName] || '';
         if (!subCategory) {
           const prodCat = (productToCategory[normalizedName] || 'General').toLowerCase();
-          const matchedCat = apiCategories.find(c => {
-            const name = (c.categoryName || c.name || c.title || '').toString().toLowerCase();
-            const id = (c.categoryId || c.id || '').toString().toLowerCase();
-            return name === prodCat || id === prodCat;
-          });
+          const matchedCat = matchApiCategory(prodCat, apiCategories);
           if (matchedCat) {
-            subCategory = matchedCat.subCategory || matchedCat.subcategory || '';
+            subCategory = getLocalizedSubCategoryFromItem(matchedCat, language) || matchedCat.subCategory_he || matchedCat.subCategory || matchedCat.subcategory || '';
           }
         }
         return subCategory.toLowerCase() === selectedSubCategory.toLowerCase();
@@ -710,7 +900,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex flex-row items-center justify-between gap-3 px-1 sm:px-3 mb-2 h-9 shrink-0">
         <div className="hidden sm:flex items-center gap-1.5 shrink-0">
           <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></div>
-          <h2 className={`text-[11px] sm:text-[12px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-wider'} text-zinc-800 dark:text-zinc-200`}>
+          <h2 className={`text-xs sm:text-sm font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-wider'} text-zinc-800 dark:text-zinc-200`}>
             {t.productsCatalog}
           </h2>
           <button 
@@ -728,10 +918,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex-1 flex flex-row gap-1.5 overflow-x-auto overflow-y-hidden scrollbar-none py-0.5 px-1 items-center justify-start min-w-0" style={{ scrollbarWidth: 'none' }}>
           <button
             onClick={() => setSelectedCategory('all')}
-            className={`px-3 py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider rounded-lg transition-all whitespace-nowrap shrink-0 border ${
+            className={`px-3.5 py-1.5 text-xs sm:text-sm font-black uppercase tracking-wider rounded-xl transition-all whitespace-nowrap shrink-0 border ${
               selectedCategory === 'all'
                 ? 'bg-yellow-500 text-zinc-950 border-yellow-500 shadow-sm font-black'
-                : 'bg-zinc-100 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/60 border-transparent dark:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
+                : 'bg-zinc-100 text-zinc-600 hover:text-zinc-800 hover:bg-zinc-200/60 border-transparent dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100 dark:hover:bg-zinc-800'
             }`}
           >
             {t.all}
@@ -740,14 +930,14 @@ const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
-              className={`px-3 py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider rounded-lg transition-all whitespace-nowrap shrink-0 border ${
+              className={`px-3.5 py-1.5 text-xs sm:text-sm font-black uppercase tracking-wider rounded-xl transition-all whitespace-nowrap shrink-0 border ${
                 selectedCategory === cat
                   ? 'bg-yellow-500 text-zinc-950 border-yellow-500 shadow-sm font-black'
-                  : 'bg-zinc-100 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/60 border-transparent dark:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800'
+                  : 'bg-zinc-100 text-zinc-600 hover:text-zinc-800 hover:bg-zinc-200/60 border-transparent dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100 dark:hover:bg-zinc-800'
               }`}
             >
               {translatedCategories[cat] || cat}
-              <span className="mx-1 text-[8px] font-mono opacity-50 inline-block" dir="ltr">({categories[cat]?.length || 0})</span>
+              <span className="mx-1 text-[10px] font-mono opacity-60 inline-block" dir="ltr">({categories[cat]?.length || 0})</span>
             </button>
           ))}
         </div>
@@ -755,17 +945,17 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Subcategories Row */}
       {availableSubCategories.length > 0 && (
-        <div className="flex flex-row items-center gap-2 px-1 sm:px-3 mb-2 h-8 shrink-0 border-t border-black/5 dark:border-white/5 pt-1.5" dir={isRTL ? 'rtl' : 'ltr'}>
-          <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-wider text-zinc-400 dark:text-zinc-500 shrink-0">
+        <div className="flex flex-row items-center gap-2 px-1 sm:px-3 mb-2 h-9 shrink-0 border-t border-black/5 dark:border-white/5 pt-1.5" dir={isRTL ? 'rtl' : 'ltr'}>
+          <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 shrink-0">
             {language === 'he' ? 'קטגוריה משנית:' : 'Subcategory:'}
           </span>
           <div className="flex-1 flex flex-row gap-1.5 overflow-x-auto overflow-y-hidden scrollbar-none py-0.5 items-center justify-start min-w-0" style={{ scrollbarWidth: 'none' }}>
             <button
               onClick={() => setSelectedSubCategory('all')}
-              className={`px-2.5 py-0.5 text-[8px] sm:text-[9px] font-black uppercase tracking-wider rounded-md transition-all whitespace-nowrap shrink-0 border ${
+              className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap shrink-0 border ${
                 selectedSubCategory === 'all'
-                  ? 'bg-yellow-500/20 text-yellow-700 border-yellow-500/30 dark:text-yellow-400 font-bold'
-                  : 'bg-zinc-100 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/40 border-transparent dark:bg-zinc-900/50 dark:text-zinc-500 dark:hover:text-zinc-300'
+                  ? 'bg-yellow-500/20 text-yellow-800 border-yellow-500/30 dark:text-yellow-400 font-extrabold'
+                  : 'bg-zinc-100 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/40 border-transparent dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:text-zinc-200'
               }`}
             >
               {t.all}
@@ -774,10 +964,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={sub}
                 onClick={() => setSelectedSubCategory(sub)}
-                className={`px-2.5 py-0.5 text-[8px] sm:text-[9px] font-black uppercase tracking-wider rounded-md transition-all whitespace-nowrap shrink-0 border ${
+                className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap shrink-0 border ${
                   selectedSubCategory === sub
-                    ? 'bg-yellow-500/20 text-yellow-700 border-yellow-500/30 dark:text-yellow-400 font-bold'
-                    : 'bg-zinc-100 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/40 border-transparent dark:bg-zinc-900/50 dark:text-zinc-500 dark:hover:text-zinc-300'
+                    ? 'bg-yellow-500/20 text-yellow-800 border-yellow-500/30 dark:text-yellow-400 font-extrabold'
+                    : 'bg-zinc-100 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/40 border-transparent dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:text-zinc-200'
                 }`}
               >
                 {translatedSubCategories[sub] || sub}

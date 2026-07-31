@@ -147,6 +147,131 @@ const CameraHandler: React.FC<{
   return null;
 };
 
+export const getLocalizedModelPart = (p: ModelPart, lang: Language): { name: string; description: string } => {
+  let description = p.description || '';
+  if (lang === 'he') {
+    description = p.description_he || (p as any).Description_he || (p as any).description_HE || description;
+  } else if (lang === 'en') {
+    description = p.description_en || (p as any).Description_en || (p as any).description_EN || description;
+  } else if (lang === 'ru') {
+    description = p.description_ru || (p as any).Description_ru || (p as any).description_RU || description;
+  } else if (lang === 'ar') {
+    description = p.description_ar || (p as any).Description_ar || (p as any).description_AR || description;
+  }
+
+  let name = '';
+  if (lang === 'he') {
+    name = p.display_name_he || (p as any).Display_name_he || p.displayName_he || (p as any).DisplayName_he || (p as any).display_name_HE || p.partName_he || (p as any).PartName_he || (p as any).partName_HE || '';
+  } else if (lang === 'en') {
+    name = p.display_name_en || (p as any).Display_name_en || p.displayName_en || (p as any).DisplayName_en || (p as any).display_name_EN || p.partName_en || (p as any).PartName_en || (p as any).partName_EN || '';
+  } else if (lang === 'ru') {
+    name = p.display_name_ru || (p as any).Display_name_ru || p.displayName_ru || (p as any).DisplayName_ru || (p as any).display_name_RU || p.partName_ru || (p as any).PartName_ru || (p as any).partName_RU || '';
+  } else if (lang === 'ar') {
+    name = p.display_name_ar || (p as any).Display_name_ar || p.displayName_ar || (p as any).DisplayName_ar || (p as any).display_name_AR || p.partName_ar || (p as any).PartName_ar || (p as any).partName_AR || '';
+  }
+
+  if (!name) {
+    name = p.display_name || (p as any).Display_name || p.displayName || (p as any).DisplayName || p.partName || '';
+  }
+
+  return { name: cleanEscapedQuotes(name), description: cleanEscapedQuotes(description) };
+};
+
+export interface LocalizedProductData {
+  title: string;
+  description: string;
+  category: string;
+  subCategory: string;
+  isExplicitTitle: boolean;
+  isExplicitDesc: boolean;
+  isExplicitCategory: boolean;
+  isExplicitSubCategory: boolean;
+}
+
+export const getLocalizedProductData = (result: any, lang: Language): LocalizedProductData => {
+  if (!result) return { title: '', description: '', category: '', subCategory: '', isExplicitTitle: false, isExplicitDesc: false, isExplicitCategory: false, isExplicitSubCategory: false };
+
+  let title = '';
+  let isExplicitTitle = false;
+  if (lang === 'he') {
+    title = result.productDisplayTitle_he || result.ProductDisplayTitle_he || result.productDisplayTitle_HE || result.productTitle_he || result.ProductTitle_he || '';
+  } else if (lang === 'en') {
+    title = result.productDisplayTitle_en || result.ProductDisplayTitle_en || result.productDisplayTitle_EN || result.productTitle_en || result.ProductTitle_en || '';
+  } else if (lang === 'ru') {
+    title = result.productDisplayTitle_ru || result.ProductDisplayTitle_ru || result.productDisplayTitle_RU || result.productTitle_ru || result.ProductTitle_ru || '';
+  } else if (lang === 'ar') {
+    title = result.productDisplayTitle_ar || result.ProductDisplayTitle_ar || result.productDisplayTitle_AR || result.productTitle_ar || result.ProductTitle_ar || '';
+  }
+
+  if (title && title.trim() !== '') {
+    isExplicitTitle = true;
+  }
+
+  let description = '';
+  let isExplicitDesc = false;
+  if (lang === 'he') {
+    description = result.productDescription_he || result.ProductDescription_he || result.productDescription_HE || '';
+  } else if (lang === 'en') {
+    description = result.productDescription_en || result.ProductDescription_en || result.productDescription_EN || '';
+  } else if (lang === 'ru') {
+    description = result.productDescription_ru || result.ProductDescription_ru || result.productDescription_RU || '';
+  } else if (lang === 'ar') {
+    description = result.productDescription_ar || result.ProductDescription_ar || result.productDescription_AR || '';
+  }
+
+  if (description && description.trim() !== '') {
+    isExplicitDesc = true;
+  }
+
+  let category = '';
+  let isExplicitCategory = false;
+  if (lang === 'he') {
+    category = result.categoryName_he || result.CategoryName_he || result.categoryName_HE || result.CategoryName_HE || result.productCategory_he || result.ProductCategory_he || result.category_he || result.Category_he || '';
+  } else if (lang === 'en') {
+    category = result.categoryName_en || result.CategoryName_en || result.categoryName_EN || result.CategoryName_EN || result.productCategory_en || result.ProductCategory_en || result.category_en || result.Category_en || '';
+  } else if (lang === 'ru') {
+    category = result.categoryName_ru || result.CategoryName_ru || result.categoryName_RU || result.CategoryName_RU || result.productCategory_ru || result.ProductCategory_ru || result.category_ru || result.Category_ru || '';
+  } else if (lang === 'ar') {
+    category = result.categoryName_ar || result.CategoryName_ar || result.categoryName_AR || result.CategoryName_AR || result.productCategory_ar || result.ProductCategory_ar || result.category_ar || result.Category_ar || '';
+  }
+
+  if (category && category.trim() !== '') {
+    isExplicitCategory = true;
+  }
+
+  let subCategory = '';
+  let isExplicitSubCategory = false;
+  if (lang === 'he') {
+    subCategory = result.subCategory_he || result.SubCategory_he || result.subCategory_HE || result.SubCategory_HE || result.productSubCategory_he || result.ProductSubCategory_he || result.subcategory_he || result.Subcategory_he || '';
+  } else if (lang === 'en') {
+    subCategory = result.subCategory_en || result.SubCategory_en || result.subCategory_EN || result.SubCategory_EN || result.productSubCategory_en || result.ProductSubCategory_en || result.subcategory_en || result.Subcategory_en || '';
+  } else if (lang === 'ru') {
+    subCategory = result.subCategory_ru || result.SubCategory_ru || result.subCategory_RU || result.SubCategory_RU || result.productSubCategory_ru || result.ProductSubCategory_ru || result.subcategory_ru || result.Subcategory_ru || '';
+  } else if (lang === 'ar') {
+    subCategory = result.subCategory_ar || result.SubCategory_ar || result.subCategory_AR || result.SubCategory_AR || result.productSubCategory_ar || result.ProductSubCategory_ar || result.subcategory_ar || result.Subcategory_ar || '';
+  }
+
+  if (subCategory && subCategory.trim() !== '') {
+    isExplicitSubCategory = true;
+  }
+
+  const fallbackTitle = result.productDisplayTitle || result.productTitle || result.title || result.name || '';
+  const fallbackDesc = result.productDescription || result.description || '';
+  const fallbackCategory = result.categoryName || result.CategoryName || result.productCategory || result.ProductCategory || result.category || result.Category || '';
+  const fallbackSubCategory = result.subCategory || result.SubCategory || result.productSubCategory || result.ProductSubCategory || result.subcategory || result.Subcategory || '';
+
+  return {
+    title: cleanEscapedQuotes(title || fallbackTitle),
+    description: cleanEscapedQuotes(description || fallbackDesc),
+    category: cleanEscapedQuotes(category || fallbackCategory),
+    subCategory: cleanEscapedQuotes(subCategory || fallbackSubCategory),
+    isExplicitTitle,
+    isExplicitDesc,
+    isExplicitCategory,
+    isExplicitSubCategory
+  };
+};
+
 const isModelTextureMatch = (fileName: string, modelName: string): boolean => {
   if (!fileName || !modelName) return false;
 
@@ -248,12 +373,14 @@ const App: React.FC = () => {
   const [orbitDirection, setOrbitDirection] = useState<'up' | 'down' | 'left' | 'right' | null>(null);
   const [isFetchingDetails, setIsFetchingDetails] = useState(false);
   const [language, setLanguage] = useState<Language>('he');
+  const [rawProductsMap, setRawProductsMap] = useState<Record<string, any>>({});
   const [productDetails, setProductDetails] = useState<{ 
     productId?: string,
     title: string, 
     description: string, 
     originalTitle: string, 
     originalDescription: string,
+    rawProductData?: any,
     linkTo?: string,
     category?: string,
     subCategory?: string,
@@ -579,7 +706,9 @@ const App: React.FC = () => {
             const data = JSON.parse(text);
             const result = Array.isArray(data) ? data[0] : data;
             if (result) {
-              const apiTitle = cleanEscapedQuotes(result.productDisplayTitle || result.productTitle || result.title || result.name || modelNameBase);
+              setRawProductsMap(prev => ({ ...prev, [normalizedName]: result }));
+              const localized = getLocalizedProductData(result, language);
+              const apiTitle = localized.title || cleanEscapedQuotes(result.productDisplayTitle || result.productTitle || result.title || result.name || modelNameBase);
               setProductDisplayTitles(prev => ({ ...prev, [normalizedName]: apiTitle }));
               setProductTitles(prev => ({ ...prev, [normalizedName]: apiTitle }));
             }
@@ -591,9 +720,35 @@ const App: React.FC = () => {
     });
   }, [catalogFiles]);
 
-  // Automatically load model from URL search parameter (e.g. ?model=CHEST)
   useEffect(() => {
-    if (catalogFiles.length === 0) return;
+    if (Object.keys(rawProductsMap).length === 0) return;
+    setProductDisplayTitles(prev => {
+      const nextMap = { ...prev };
+      Object.entries(rawProductsMap).forEach(([normalizedName, rawResult]) => {
+        const localized = getLocalizedProductData(rawResult, language);
+        if (localized.title) {
+          nextMap[normalizedName] = localized.title;
+        }
+      });
+      return nextMap;
+    });
+    setProductTitles(prev => {
+      const nextMap = { ...prev };
+      Object.entries(rawProductsMap).forEach(([normalizedName, rawResult]) => {
+        const localized = getLocalizedProductData(rawResult, language);
+        if (localized.title) {
+          nextMap[normalizedName] = localized.title;
+        }
+      });
+      return nextMap;
+    });
+  }, [language, rawProductsMap]);
+
+  // Automatically load model from URL search parameter (e.g. ?model=CHEST) if present
+  const hasLoadedInitialModelRef = useRef(false);
+
+  useEffect(() => {
+    if (catalogFiles.length === 0 || hasLoadedInitialModelRef.current) return;
     
     const params = new URLSearchParams(window.location.search);
     const modelParam = params.get('model');
@@ -619,14 +774,20 @@ const App: React.FC = () => {
       if (match) {
         console.log(`[URLParam] Auto-loading model from query param: ${match.name}`);
         handleAddFromUrl(match.url, match.name);
+        hasLoadedInitialModelRef.current = true;
+      } else {
+        hasLoadedInitialModelRef.current = true;
       }
+    } else {
+      // Do not auto-load any model on initial visit unless specified in URL parameter
+      hasLoadedInitialModelRef.current = true;
     }
-  }, [catalogFiles, productDisplayTitles]);
+  }, [catalogFiles, productDisplayTitles, models.length]);
 
   // Sync selected model to browser URL search params
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
     if (selectedModel) {
-      const params = new URLSearchParams(window.location.search);
       const currentParam = params.get('model');
       
       const modelNameBase = selectedModel.name.replace(/\.fbx$/i, '');
@@ -640,8 +801,12 @@ const App: React.FC = () => {
         const newUrl = `${window.location.pathname}?${params.toString()}`;
         window.history.replaceState({}, '', newUrl);
       }
+    } else if (models.length === 0 && params.has('model') && hasLoadedInitialModelRef.current) {
+      params.delete('model');
+      const newUrl = params.toString() ? `${window.location.pathname}?${params.toString()}` : window.location.pathname;
+      window.history.replaceState({}, '', newUrl);
     }
-  }, [selectedModel, productDetails, productDisplayTitles]);
+  }, [selectedModel, productDetails, productDisplayTitles, models.length]);
 
   useEffect(() => {
     const fetchTextures = async () => {
@@ -716,8 +881,12 @@ const App: React.FC = () => {
                 if (data && active) {
                   const result = Array.isArray(data) ? data[0] : data;
                   if (result) {
-                    const apiTitle = cleanEscapedQuotes(result.productDisplayTitle || result.productTitle || result.title || result.name || selectedModel.name);
-                    const desc = cleanEscapedQuotes(result.productDescription || result.description || '');
+                    const normalizedName = selectedModel.name.trim().toLowerCase();
+                    setRawProductsMap(prev => ({ ...prev, [normalizedName]: result }));
+                    
+                    const localized = getLocalizedProductData(result, language);
+                    const apiTitle = localized.title || cleanEscapedQuotes(result.productDisplayTitle || result.productTitle || result.title || result.name || selectedModel.name);
+                    const desc = localized.description || cleanEscapedQuotes(result.productDescription || result.description || '');
                     const pId = result.productId || result.ProductId || result.id || '';
                     
                     if (pId && loggedViewProductIdRef.current !== pId) {
@@ -728,9 +897,8 @@ const App: React.FC = () => {
                     }
                     
                     // Store title for sidebar and catalog consistency
-                    const normalizedName = selectedModel.name.trim().toLowerCase();
                     const productTitleVal = cleanEscapedQuotes(result.productTitle || result.title || result.name || selectedModel.name);
-                    setProductTitles(prev => ({ ...prev, [normalizedName]: productTitleVal }));
+                    setProductTitles(prev => ({ ...prev, [normalizedName]: apiTitle || productTitleVal }));
                     
                     if (active) {
                       const pPrice = result.productPrice !== undefined ? Number(result.productPrice) : (result.price !== undefined ? Number(result.price) : undefined);
@@ -738,11 +906,12 @@ const App: React.FC = () => {
                         productId: pId,
                         title: apiTitle,
                         description: desc,
-                        originalTitle: apiTitle,
-                        originalDescription: desc,
+                        originalTitle: cleanEscapedQuotes(result.productDisplayTitle || result.productTitle || selectedModel.name),
+                        originalDescription: cleanEscapedQuotes(result.productDescription || result.description || ''),
+                        rawProductData: result,
                         linkTo: result.linkTo,
-                        category: result.productCategory || result.category || '',
-                        subCategory: result.productSubCategory || result.subCategory || result.subcategory || '',
+                        category: localized.category || result.productCategory || result.category || '',
+                        subCategory: localized.subCategory || result.productSubCategory || result.subCategory || result.subcategory || '',
                         originalCategory: result.productCategory || result.category || '',
                         originalSubCategory: result.productSubCategory || result.subCategory || result.subcategory || '',
                         price: pPrice
@@ -785,57 +954,93 @@ const App: React.FC = () => {
     };
   }, [selectedId, selectedModel?.name]);
 
-  // Translate product info when language changes
+  // Update product info when language changes
   useEffect(() => {
-    const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
+    if (!productDetails?.rawProductData) return;
     
-    if (productDetails) {
-      const translateInfo = async () => {
-        const promises = [
-          translateText(productDetails.originalTitle, langName),
-          translateText(productDetails.originalDescription, langName)
-        ];
-        if (productDetails.originalCategory) {
-          promises.push(translateText(productDetails.originalCategory, langName));
-        } else {
-          promises.push(Promise.resolve(''));
-        }
-        if (productDetails.originalSubCategory) {
-          promises.push(translateText(productDetails.originalSubCategory, langName));
-        } else {
-          promises.push(Promise.resolve(''));
-        }
+    let isSubscribed = true;
+    const localized = getLocalizedProductData(productDetails.rawProductData, language);
+    const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
 
-        const [tTitle, tDesc, tCat, tSub] = await Promise.all(promises);
+    const updateDetails = async () => {
+      let finalTitle = localized.title;
+      let finalDesc = localized.description;
+      let finalCat = localized.category;
+      let finalSubCat = localized.subCategory;
+
+      if (!localized.isExplicitTitle && finalTitle && language !== 'en') {
+        const translated = await translateText(finalTitle, langName);
+        if (translated) finalTitle = translated;
+      }
+
+      if (!localized.isExplicitDesc && finalDesc && language !== 'en') {
+        const translated = await translateText(finalDesc, langName);
+        if (translated) finalDesc = translated;
+      }
+
+      if (!localized.isExplicitCategory && finalCat && language !== 'en') {
+        const translated = await translateText(finalCat, langName);
+        if (translated) finalCat = translated;
+      }
+
+      if (!localized.isExplicitSubCategory && finalSubCat && language !== 'en') {
+        const translated = await translateText(finalSubCat, langName);
+        if (translated) finalSubCat = translated;
+      }
+
+      if (isSubscribed) {
         setProductDetails(prev => prev ? { 
           ...prev, 
-          title: tTitle, 
-          description: tDesc, 
-          category: tCat || prev.originalCategory,
-          subCategory: tSub || prev.originalSubCategory
+          title: finalTitle || prev.originalTitle, 
+          description: finalDesc || prev.originalDescription,
+          category: finalCat || prev.originalCategory,
+          subCategory: finalSubCat || prev.originalSubCategory
         } : null);
-      };
-      translateInfo();
-    }
-  }, [language, productDetails?.originalDescription, productDetails?.originalTitle, productDetails?.originalCategory, productDetails?.originalSubCategory]);
+      }
+    };
 
-  // Translate selected model name
+    updateDetails();
+    return () => { isSubscribed = false; };
+  }, [language, productDetails?.rawProductData]);
+
+  // Update selected model name when language changes
   useEffect(() => {
     if (!selectedModel) {
       setTranslatedSelectedModelName('');
       return;
     }
-    const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
+    let isSubscribed = true;
     const originalDisplayName = selectedModel.name;
-    const cleanFileName = originalDisplayName.replace(/_/g, ' ').replace(/-/g, ' ');
-    const displayTitle = productDetails?.originalTitle || productDisplayTitles[originalDisplayName.replace(/\.fbx$/i, '').trim().toLowerCase()] || cleanFileName;
+    const normalizedName = originalDisplayName.replace(/\.fbx$/i, '').trim().toLowerCase();
+    const rawProduct = productDetails?.rawProductData || rawProductsMap[normalizedName];
     
-    const translateName = async () => {
-      const translated = await translateText(displayTitle, langName);
-      setTranslatedSelectedModelName(translated);
-    };
-    translateName();
-  }, [language, selectedModel?.name, productDetails?.originalTitle, productDisplayTitles]);
+    let baseTitle = '';
+    let isExplicit = false;
+
+    if (rawProduct) {
+      const localized = getLocalizedProductData(rawProduct, language);
+      baseTitle = localized.title;
+      isExplicit = localized.isExplicitTitle;
+    }
+
+    if (!baseTitle) {
+      const cleanFileName = originalDisplayName.replace(/_/g, ' ').replace(/-/g, ' ');
+      baseTitle = productDisplayTitles[normalizedName] || cleanFileName;
+    }
+
+    if (isExplicit || language === 'en') {
+      setTranslatedSelectedModelName(baseTitle);
+    } else {
+      const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
+      translateText(baseTitle, langName).then(translated => {
+        if (isSubscribed) {
+          setTranslatedSelectedModelName(translated || baseTitle);
+        }
+      });
+    }
+
+    return () => { isSubscribed = false; };
+  }, [language, selectedModel?.name, productDetails?.rawProductData, rawProductsMap, productDisplayTitles]);
 
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
   const [environmentUrl, setEnvironmentUrl] = useState<string | null>(null);
@@ -938,75 +1143,61 @@ const App: React.FC = () => {
     
     // We prefer fetching parts based on the specific model filename first, 
     // as it's often more unique than the readable title.
-    const searchName = modelNameForFetch || productDetails?.originalTitle;
+    if (!selectedId) return;
 
-    if (!selectedId || !searchName) {
-      return;
+    // Build candidates list for searching model parts in Azure DB
+    const candidates: string[] = [];
+    if (modelNameForFetch) {
+      candidates.push(modelNameForFetch);
+      const clean = modelNameForFetch.replace(/\.[^/.]+$/, '');
+      if (clean && clean !== modelNameForFetch) candidates.push(clean);
     }
+    if (productDetails?.originalTitle) {
+      if (!candidates.includes(productDetails.originalTitle)) candidates.push(productDetails.originalTitle);
+      const cleanTitle = productDetails.originalTitle.replace(/\.[^/.]+$/, '');
+      if (cleanTitle && !candidates.includes(cleanTitle)) candidates.push(cleanTitle);
+    }
+    if (selectedModelForFetch?.name && !candidates.includes(selectedModelForFetch.name)) {
+      candidates.push(selectedModelForFetch.name);
+    }
+
+    if (candidates.length === 0) return;
 
     // Fetch from our local API which connects to Azure
     const fetchModelParts = async () => {
       setIsFetchingParts(true);
       try {
-        const response = await fetch(`/api/model-parts?modelName=${encodeURIComponent(searchName)}`);
-        if (!active) return;
-        if (!response.ok) {
-          console.warn(`Server responded with ${response.status} for model parts`);
-          if (active) setIsFetchingParts(false);
-          return;
-        }
-        const text = await response.text();
-        if (!active) return;
-        if (text && (text.trim().startsWith('[') || text.trim().startsWith('{'))) { 
-          try {
-            const data = JSON.parse(text);
-            const parts = Array.isArray(data) ? data : (data.parts || []);
-            if (parts.length > 0 && active) {
-              setModelParts(parts);
-              
-              // Pre-translate descriptions in the background for current language
-              const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
-              if (langName !== 'English') {
-                const translateParts = async () => {
-                  const textsToTranslate: string[] = [];
-                  const mapping: { id: string, name: string, desc: string }[] = [];
-                  
-                  for (const p of parts) {
-                    textsToTranslate.push(p.partName);
-                    textsToTranslate.push(p.description);
-                    mapping.push({ id: p.id, name: p.partName, desc: p.description });
-                  }
+        for (const searchCandidate of candidates) {
+          if (!active) break;
+          const response = await fetch(`/api/model-parts?modelName=${encodeURIComponent(searchCandidate)}`);
+          if (!active) break;
+          if (!response.ok) continue;
 
-                  try {
-                    const translatedResults = await translateBatch(textsToTranslate, langName);
-                    if (!active) return;
-                    const newTranslatedParts: Record<string, { name: string, description: string }> = {};
-                    
-                    let resultIdx = 0;
-                    mapping.forEach(item => {
-                      const tName = translatedResults[resultIdx++];
-                      const tDesc = translatedResults[resultIdx++];
-                      newTranslatedParts[item.id] = { name: tName, description: tDesc };
-                    });
-                    
-                    if (active) {
-                      setTranslatedParts(newTranslatedParts);
-                    }
-                  } catch (err) {
-                    console.error("Initial batch part translation failed:", err);
-                  }
-                };
-                translateParts();
+          const text = await response.text();
+          if (!active) break;
+
+          if (text && (text.trim().startsWith('[') || text.trim().startsWith('{'))) {
+            try {
+              const data = JSON.parse(text);
+              const parts = Array.isArray(data) ? data : (data.parts || []);
+              if (parts.length > 0 && active) {
+                setModelParts(parts);
+
+                // Immediately resolve localized name and description from DB pre-translated fields
+                const newTranslatedParts: Record<string, { name: string, description: string }> = {};
+                parts.forEach((p: ModelPart) => {
+                  newTranslatedParts[p.id] = getLocalizedModelPart(p, language);
+                });
+                setTranslatedParts(newTranslatedParts);
+                break; // Found valid parts, stop searching candidate names!
               }
+            } catch (parseErr) {
+              console.error("Failed to parse model parts JSON:", parseErr);
             }
-          } catch (parseErr) {
-            console.error("Failed to parse model parts JSON:", parseErr, "Text preview:", text.substring(0, 100));
           }
-        } else {
-          console.warn("Received non-JSON response from model-parts API");
         }
       } catch (err) {
-        console.error("Failed to fetch model parts from Azure API:", err)
+        console.error("Failed to fetch model parts from Azure API:", err);
       } finally {
         if (active) setIsFetchingParts(false);
       }
@@ -1020,42 +1211,31 @@ const App: React.FC = () => {
   }, [selectedId, modelNameForFetch, productDetails?.originalTitle]);
 
   useEffect(() => {
-    const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
-    
     if (modelParts.length > 0) {
-      const translateAllParts = async () => {
-        const textsToTranslate: string[] = [];
-        const mapping: { id: string, name: string, desc: string }[] = [];
-        
-        for (const p of modelParts) {
-          textsToTranslate.push(p.partName);
-          textsToTranslate.push(p.description);
-          mapping.push({ id: p.id, name: p.partName, desc: p.description });
-        }
-
-        try {
-          const translatedResults = await translateBatch(textsToTranslate, langName);
-          const newTranslatedParts: Record<string, { name: string, description: string }> = {};
-          
-          let resultIdx = 0;
-          mapping.forEach(item => {
-            const tName = translatedResults[resultIdx++];
-            const tDesc = translatedResults[resultIdx++];
-            newTranslatedParts[item.id] = { name: tName, description: tDesc };
-          });
-          
-          setTranslatedParts(newTranslatedParts);
-        } catch (err) {
-          console.error("Batch part translation failed:", err);
-        }
-      };
-      translateAllParts();
+      const newTranslatedParts: Record<string, { name: string, description: string }> = {};
+      modelParts.forEach((p: ModelPart) => {
+        newTranslatedParts[p.id] = getLocalizedModelPart(p, language);
+      });
+      setTranslatedParts(newTranslatedParts);
     }
   }, [language, modelParts]);
 
   // Fetch and translate descriptions for matched catalog products (relatable parts)
   useEffect(() => {
-    const visibleParts = modelParts ? modelParts.filter(part => part.presentAtSite !== false) : [];
+    const isPartPresent = (p: any) => {
+      if (!p) return false;
+      const val = p.presentAtSite ?? p.PresentAtSite ?? p.displayInSite ?? p.DisplayInSite ?? p.present_at_site ?? p.display_in_site ?? p.present ?? p.Present ?? p.inSite ?? p.InSite ?? p.isPresent ?? p.IsPresent;
+      if (val === undefined || val === null) return false;
+      if (typeof val === 'boolean') return val;
+      if (typeof val === 'number') return val > 0;
+      if (typeof val === 'string') {
+        const s = val.trim().toLowerCase();
+        if (s === '' || s === 'false' || s === '0' || s === 'no' || s === 'none' || s === 'null' || s === 'undefined' || s === 'off' || s === 'לא' || s === 'אין' || s === 'לא קיים' || s === 'חסר' || s === 'n') return false;
+        return true;
+      }
+      return Boolean(val);
+    };
+    const visibleParts = modelParts ? modelParts.filter(part => isPartPresent(part)) : [];
     if (visibleParts.length === 0 || catalogFiles.length === 0) return;
 
     visibleParts.forEach(async (part) => {
@@ -1170,30 +1350,20 @@ const App: React.FC = () => {
       const targetPos = worldPartPos.clone().add(dirToPart.multiplyScalar(zoomDistance));
       setTargetView({ pos: targetPos, lookAt: worldPartPos });
 
-      // 2. Set active part IMMEDIATELY with translating state
-      const currentTranslation = translatedParts[part.id];
+      // 2. Set active part IMMEDIATELY with localized details
+      const matchedPart = modelParts.find(p => p.id === part.id);
+      const currentTranslation = translatedParts[part.id] || (matchedPart ? getLocalizedModelPart(matchedPart, language) : null);
+      const nameToUse = currentTranslation?.name || part.name;
+      const descToUse = currentTranslation?.description || part.description;
+
       setActivePart({ 
         ...part, 
-        name: currentTranslation?.name || part.name,
-        description: currentTranslation?.description || t.translating 
+        name: nameToUse,
+        description: descToUse 
       });
 
-      // 3. Speak the description in the background (and translate it)
-      // Use existing translation if available to skip redundant network calls inside speakText
-      const descToSpeak = currentTranslation?.description || part.description;
-      speakText(descToSpeak, language).then(translated => {
-        // 4. Update UI state with translated text once ready
-        if (translated) {
-          // Also update the translatedParts cache if it wasn't there
-          if (!currentTranslation) {
-             setTranslatedParts(prev => ({
-               ...prev,
-               [part.id]: { ...prev[part.id], description: translated }
-             }));
-          }
-          setActivePart(prev => prev?.id === part.id ? { ...prev, description: translated } : prev);
-        }
-      });
+      // 3. Speak the description in the target language
+      speakText(descToUse, language);
     } else {
       setActivePart(null);
       if (selectedId) updateModelSettings(selectedId, { targetPartId: undefined });
@@ -2327,7 +2497,6 @@ const App: React.FC = () => {
       <div 
         className={`absolute top-0 left-0 right-0 bottom-0 z-10 transition-colors duration-1000 ${isNightMode ? 'bg-zinc-800/50' : 'bg-transparent'}`}
       >
-        
         {showModelLoadingScreen && (
           <div className="absolute inset-0 z-40 bg-stone-50/98 backdrop-blur-xl dark:bg-zinc-950/98 flex flex-col items-center justify-center animate-in fade-in duration-300">
             {/* Elegant Circular Progress Loader with percentages and continuous rotation */}
@@ -2641,34 +2810,34 @@ const App: React.FC = () => {
                   <div className="space-y-6 pb-12">
                     {/* Category & Subcategory Badges */}
                     {(productDetails?.category || productDetails?.subCategory || productDetails?.price !== undefined) && (
-                      <div className="flex flex-wrap gap-2 pt-1">
+                      <div className="flex flex-wrap gap-2.5 pt-1">
                         {productDetails?.category && (
-                          <div className={`px-3 py-1.5 rounded-2xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 border shadow-sm ${
+                          <div className={`px-3.5 py-2 rounded-2xl text-xs sm:text-sm font-black tracking-wide flex items-center gap-2 border shadow-sm ${
                             isNightMode 
                               ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' 
-                              : 'bg-yellow-50 text-yellow-700 border-yellow-200'
+                              : 'bg-yellow-50 text-yellow-800 border-yellow-200'
                           }`}>
-                            <span className="opacity-60">{language === 'he' ? 'קטגוריה:' : 'Category:'}</span>
+                            <span className="opacity-70 font-bold">{language === 'he' ? 'קטגוריה:' : 'Category:'}</span>
                             <span>{productDetails.category}</span>
                           </div>
                         )}
                         {productDetails?.subCategory && (
-                          <div className={`px-3 py-1.5 rounded-2xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 border shadow-sm ${
+                          <div className={`px-3.5 py-2 rounded-2xl text-xs sm:text-sm font-black tracking-wide flex items-center gap-2 border shadow-sm ${
                             isNightMode 
-                              ? 'bg-zinc-800/80 text-zinc-300 border-zinc-700/80' 
-                              : 'bg-zinc-100 text-zinc-600 border-zinc-200'
+                              ? 'bg-zinc-800/90 text-zinc-200 border-zinc-700/80' 
+                              : 'bg-zinc-100 text-zinc-800 border-zinc-200'
                           }`}>
-                            <span className="opacity-60">{language === 'he' ? 'קטגוריה משנית:' : 'Subcategory:'}</span>
+                            <span className="opacity-70 font-bold">{language === 'he' ? 'קטגוריה משנית:' : 'Subcategory:'}</span>
                             <span>{productDetails.subCategory}</span>
                           </div>
                         )}
                         {productDetails?.price !== undefined && (
-                          <div className={`px-3 py-1.5 rounded-2xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 border shadow-sm ${
+                          <div className={`px-3.5 py-2 rounded-2xl text-xs sm:text-sm font-black tracking-wide flex items-center gap-2 border shadow-sm ${
                             isNightMode 
                               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                           }`}>
-                            <span className="opacity-60">{t.price || (language === 'he' ? 'מחיר:' : 'Price:')}</span>
+                            <span className="opacity-70 font-bold">{t.price || (language === 'he' ? 'מחיר:' : 'Price:')}</span>
                             <span>₪{productDetails.price.toLocaleString()}</span>
                           </div>
                         )}
@@ -2679,7 +2848,7 @@ const App: React.FC = () => {
                     <div className={`${isIPad ? 'p-4' : 'p-6'} rounded-3xl border ${
                       isNightMode ? 'bg-zinc-800/50 border-white/30' : 'bg-zinc-50/50 border-black/5'
                     }`}>
-                      <h3 className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isIPad ? 'mb-2' : 'mb-4'} ${isNightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                      <h3 className={`text-xs sm:text-sm font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isIPad ? 'mb-2' : 'mb-4'} ${isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
                         {t.productDescription}
                       </h3>
                       {isFetchingDetails ? (
@@ -2696,7 +2865,20 @@ const App: React.FC = () => {
 
                     {/* Parts Section */}
                     {(() => {
-                      const visibleParts = modelParts ? modelParts.filter(part => part.presentAtSite !== false) : [];
+                      const isPartPresent = (p: any) => {
+                        if (!p) return false;
+                        const val = p.presentAtSite ?? p.PresentAtSite ?? p.displayInSite ?? p.DisplayInSite ?? p.present_at_site ?? p.display_in_site ?? p.present ?? p.Present ?? p.inSite ?? p.InSite ?? p.isPresent ?? p.IsPresent;
+                        if (val === undefined || val === null) return false;
+                        if (typeof val === 'boolean') return val;
+                        if (typeof val === 'number') return val > 0;
+                        if (typeof val === 'string') {
+                          const s = val.trim().toLowerCase();
+                          if (s === '' || s === 'false' || s === '0' || s === 'no' || s === 'none' || s === 'null' || s === 'undefined' || s === 'off' || s === 'לא' || s === 'אין' || s === 'לא קיים' || s === 'חסר' || s === 'n') return false;
+                          return true;
+                        }
+                        return Boolean(val);
+                      };
+                      const visibleParts = modelParts ? modelParts.filter(part => isPartPresent(part)) : [];
                       if (!isFetchingParts && visibleParts.length === 0) return null;
                       
                       return (
@@ -2784,8 +2966,8 @@ const App: React.FC = () => {
                                 {relatableParts.length > 0 && (
                                   <div className="space-y-3">
                                     <div className="flex items-center gap-2 mb-2">
-                                      <div className={`w-1 h-3 bg-yellow-500 rounded-full ${isRTL ? 'ml-0' : ''}`}></div>
-                                      <h3 className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
+                                      <div className={`w-1.5 h-4 bg-yellow-500 rounded-full ${isRTL ? 'ml-0' : ''}`}></div>
+                                      <h3 className={`text-xs sm:text-sm font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
                                         {t.modelParts}
                                       </h3>
                                     </div>
@@ -2866,23 +3048,23 @@ const App: React.FC = () => {
                                             </div>
                                           </div>
 
-                                           {/* Details layout */}
+                                          {/* Details layout */}
                                           <div className="flex-1 space-y-2 min-w-0">
                                             <div className="flex items-start gap-2 min-w-0 w-full">
-                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                              <span className={`text-xs sm:text-sm font-extrabold ${isRTL ? '' : 'uppercase'} w-20 sm:w-24 shrink-0 opacity-70 ${isActive ? 'text-yellow-900' : isNightMode ? 'text-zinc-300' : 'text-zinc-600'}`}>
                                                 {t.labelPartName}:
                                               </span>
-                                              <span className={`text-[11px] font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-zinc-900' : isNightMode ? 'text-white' : 'text-zinc-900'} break-words whitespace-normal min-w-0 flex-1`}>
+                                              <span className={`text-xs sm:text-sm font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-zinc-950' : isNightMode ? 'text-white' : 'text-zinc-900'} break-words whitespace-normal min-w-0 flex-1`}>
                                                 {name}
                                               </span>
                                             </div>
 
                                             <div className="flex items-start gap-2 min-w-0 w-full">
-                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                              <span className={`text-xs sm:text-sm font-extrabold ${isRTL ? '' : 'uppercase'} w-20 sm:w-24 shrink-0 opacity-70 ${isActive ? 'text-yellow-900' : isNightMode ? 'text-zinc-300' : 'text-zinc-600'}`}>
                                                 {t.labelPartDescription}:
                                               </span>
                                               <div 
-                                                className={`text-[11px] leading-snug line-clamp-none whitespace-normal break-words min-w-0 flex-1 ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
+                                                className={`text-xs sm:text-sm leading-relaxed line-clamp-none whitespace-normal break-words min-w-0 flex-1 ${isActive ? 'text-zinc-900' : isNightMode ? 'text-zinc-200' : 'text-zinc-600'}`}
                                                 dangerouslySetInnerHTML={{ __html: description }}
                                               />
                                             </div>
@@ -2901,8 +3083,8 @@ const App: React.FC = () => {
                                 {pointsOfInterestParts.length > 0 && (
                                   <div className="space-y-3">
                                     <div className="flex items-center gap-2 mb-2">
-                                      <div className={`w-1 h-3 bg-yellow-500 rounded-full ${isRTL ? 'ml-0' : ''}`}></div>
-                                      <h3 className={`text-[9px] font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
+                                      <div className={`w-1.5 h-4 bg-yellow-500 rounded-full ${isRTL ? 'ml-0' : ''}`}></div>
+                                      <h3 className={`text-xs sm:text-sm font-black ${isRTL ? '' : 'uppercase'} ${isRTL ? 'tracking-normal' : 'tracking-[0.15em]'} ${isNightMode ? 'text-white' : 'text-zinc-800'}`}>
                                         {t.pointsOfInterest}
                                       </h3>
                                     </div>
@@ -2947,20 +3129,20 @@ const App: React.FC = () => {
                                           {/* Details layout */}
                                           <div className="flex-1 space-y-2 min-w-0">
                                             <div className="flex items-start gap-2 min-w-0 w-full">
-                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                              <span className={`text-xs sm:text-sm font-extrabold ${isRTL ? '' : 'uppercase'} w-20 sm:w-24 shrink-0 opacity-70 ${isActive ? 'text-yellow-900' : isNightMode ? 'text-zinc-300' : 'text-zinc-600'}`}>
                                                 {t.labelPartName}:
                                               </span>
-                                              <span className={`text-[11px] font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-zinc-900' : isNightMode ? 'text-white' : 'text-zinc-900'} break-words whitespace-normal min-w-0 flex-1`}>
+                                              <span className={`text-xs sm:text-sm font-black ${isRTL ? '' : 'uppercase'} ${isActive ? 'text-zinc-950' : isNightMode ? 'text-white' : 'text-zinc-900'} break-words whitespace-normal min-w-0 flex-1`}>
                                                 {name}
                                               </span>
                                             </div>
 
                                             <div className="flex items-start gap-2 min-w-0 w-full">
-                                              <span className={`text-[10px] font-bold ${isRTL ? '' : 'uppercase'} w-14 sm:w-16 shrink-0 opacity-60 ${isActive ? 'text-yellow-800' : isNightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                                              <span className={`text-xs sm:text-sm font-extrabold ${isRTL ? '' : 'uppercase'} w-20 sm:w-24 shrink-0 opacity-70 ${isActive ? 'text-yellow-900' : isNightMode ? 'text-zinc-300' : 'text-zinc-600'}`}>
                                                 {t.labelPartDescription}:
                                               </span>
                                               <div 
-                                                className={`text-[11px] leading-snug line-clamp-none whitespace-normal break-words min-w-0 flex-1 ${isActive ? 'text-zinc-800' : isNightMode ? 'text-zinc-300' : 'text-zinc-500'}`}
+                                                className={`text-xs sm:text-sm leading-relaxed line-clamp-none whitespace-normal break-words min-w-0 flex-1 ${isActive ? 'text-zinc-900' : isNightMode ? 'text-zinc-200' : 'text-zinc-600'}`}
                                                 dangerouslySetInnerHTML={{ __html: description }}
                                               />
                                             </div>
