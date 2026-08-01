@@ -89,10 +89,38 @@ const getCategoryPrimaryTitle = (c: any): string => {
   ).toString().trim();
 };
 
+const categorySynonyms: Record<string, string[]> = {
+  'אודיו': ['audio', 'sound', 'שמע', 'סאונד'],
+  'רכב': ['vehicle', 'car', 'automotive', 'vehicles', 'cars'],
+  'צעצועים': ['toys', 'toy', 'games'],
+  'חלקי קליפר': ['caliper', 'caliper parts', 'calipers'],
+  'חשמל ורשת': ['electricity', 'electrical', 'power', 'network', 'connectors'],
+  'ריהוט': ['furniture', 'furnishings'],
+  'בית ולגינה': ['home & garden', 'home and garden', 'home', 'garden', 'לבית ולגינה'],
+  'לבית ולגינה': ['home & garden', 'home and garden', 'home', 'garden', 'בית ולגינה'],
+};
+
+const isInvalidCategoryName = (cat: string): boolean => {
+  if (!cat) return true;
+  const l = cat.trim().toLowerCase();
+  return (
+    l === '' ||
+    l === 'tenants' ||
+    l === 'tenant' ||
+    l === 'tenanta' ||
+    l === 'files' ||
+    l === 'images' ||
+    l === 'models' ||
+    l === 'null' ||
+    l === 'undefined'
+  );
+};
+
 const matchApiCategory = (catStr: string, apiCats: any[]) => {
   if (!catStr || !apiCats || apiCats.length === 0) return undefined;
   const low = catStr.trim().toLowerCase();
-  return apiCats.find(c => {
+  
+  const directMatch = apiCats.find(c => {
     const id = (c.categoryId || c.id || '').toString().toLowerCase();
     const nameHe = (c.categoryName_he || c.CategoryName_he || '').toString().toLowerCase();
     const nameEn = (c.categoryName_en || c.CategoryName_en || '').toString().toLowerCase();
@@ -105,13 +133,23 @@ const matchApiCategory = (catStr: string, apiCats: any[]) => {
       (nameEn && nameEn === low) ||
       (nameAr && nameAr === low) ||
       (nameRu && nameRu === low) ||
-      (nameGen && nameGen === low)
+      (nameGen && nameGen === low) ||
+      (nameHe && (low.includes(nameHe) || nameHe.includes(low)))
     );
+  });
+  if (directMatch) return directMatch;
+
+  return apiCats.find(c => {
+    const nameHe = (c.categoryName_he || c.CategoryName_he || c.categoryName_en || '').toString().trim();
+    const syns = categorySynonyms[nameHe] || [];
+    return syns.some(s => s.toLowerCase() === low);
   });
 };
 
 const getApiCategoriesForCategory = (catStr: string, apiCats: any[]): any[] => {
   if (!catStr || !apiCats || apiCats.length === 0) return [];
+  const matched = matchApiCategory(catStr, apiCats);
+  if (matched) return [matched];
   const low = catStr.trim().toLowerCase();
   return apiCats.filter(c => {
     const id = (c.categoryId || c.id || '').toString().toLowerCase();
@@ -126,7 +164,8 @@ const getApiCategoriesForCategory = (catStr: string, apiCats: any[]): any[] => {
       (nameEn && nameEn === low) ||
       (nameAr && nameAr === low) ||
       (nameRu && nameRu === low) ||
-      (nameGen && nameGen === low)
+      (nameGen && nameGen === low) ||
+      (nameHe && (low.includes(nameHe) || nameHe.includes(low)))
     );
   });
 };
@@ -678,10 +717,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   const categories = React.useMemo(() => {
     const groups: Record<string, any[]> = {};
     
-    // First, populate groups with all categories from apiCategories (tenantA)
+    // Populate groups with all main categories from apiCategories (tenantA)
     apiCategories.forEach(c => {
       const primaryName = getCategoryPrimaryTitle(c);
-      if (primaryName && !groups[primaryName]) {
+      if (primaryName && !isInvalidCategoryName(primaryName) && !groups[primaryName]) {
         groups[primaryName] = [];
       }
     });
@@ -691,7 +730,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       const normalizedName = originalDisplayName.trim().toLowerCase();
       
       // Try to get category from product metadata
-      let rawCat = productToCategory[normalizedName] || 'General';
+      let rawCat = productToCategory[normalizedName] || '';
       
       const matchedCategory = matchApiCategory(rawCat, apiCategories);
 
@@ -702,34 +741,42 @@ const Sidebar: React.FC<SidebarProps> = ({
         const existingKey = Object.keys(groups).find(k => k.toLowerCase() === rawCat.toLowerCase());
         if (existingKey) {
           category = existingKey;
+        } else if (!isInvalidCategoryName(rawCat)) {
+          category = rawCat;
         } else {
-          // Fallback to original folder grouping if no DB association found
-          const parts = file.key.split('/');
-          if (parts.length > 1) {
-            if (parts[0].toLowerCase() === 'files') {
-              category = parts.length > 2 ? parts[1] : 'General';
-            } else {
-              category = parts[0];
-            }
-          } else {
-            category = 'General';
-          }
+          category = 'General';
         }
+      }
+
+      if (isInvalidCategoryName(category)) {
+        category = 'General';
       }
       
       if (!groups[category]) groups[category] = [];
       groups[category].push(file);
     });
 
-    // Filter out categories with 0 items
-    const nonEmptyGroups: Record<string, any[]> = {};
-    Object.entries(groups).forEach(([cat, files]) => {
-      if (files.length > 0) {
-        nonEmptyGroups[cat] = files;
+    const finalGroups: Record<string, any[]> = {};
+
+    // 1. Include main categories from apiCategories in order ONLY if they have files (> 0)
+    apiCategories.forEach(c => {
+      const primaryName = getCategoryPrimaryTitle(c);
+      if (primaryName && !isInvalidCategoryName(primaryName)) {
+        const catFiles = groups[primaryName] || [];
+        if (catFiles.length > 0) {
+          finalGroups[primaryName] = catFiles;
+        }
       }
     });
 
-    return nonEmptyGroups;
+    // 2. Include any non-API custom categories if they have files and are valid
+    Object.entries(groups).forEach(([cat, files]) => {
+      if (!isInvalidCategoryName(cat) && !finalGroups[cat] && files.length > 0) {
+        finalGroups[cat] = files;
+      }
+    });
+
+    return finalGroups;
   }, [visibleFiles, productToCategory, apiCategories]);
 
   React.useEffect(() => {
