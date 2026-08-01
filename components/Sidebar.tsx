@@ -1007,6 +1007,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     return counts;
   }, [availableSubCategories, baseCategoryFiles, doesFileMatchSubCategory]);
 
+  const displayedSubCategories = React.useMemo(() => {
+    return availableSubCategories.filter(sub => (subCategoryCounts[sub] || 0) > 0);
+  }, [availableSubCategories, subCategoryCounts]);
+
   const filteredProducts = React.useMemo(() => {
     let base = baseCategoryFiles;
     
@@ -1086,7 +1090,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Subcategories Row */}
-      {availableSubCategories.length > 0 && (
+      {displayedSubCategories.length > 0 && (
         <div className="flex flex-row items-center gap-2 px-1 sm:px-3 mb-2 h-9 shrink-0 border-t border-black/5 dark:border-white/5 pt-1.5" dir={isRTL ? 'rtl' : 'ltr'}>
           <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 shrink-0">
             {language === 'he' ? 'קטגוריה משנית:' : 'Subcategory:'}
@@ -1103,7 +1107,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               {t.all}
               <span className="mx-1 text-[10px] font-mono opacity-60 inline-block" dir="ltr">({baseCategoryFiles.length})</span>
             </button>
-            {availableSubCategories.map((sub) => (
+            {displayedSubCategories.map((sub) => (
               <button
                 key={sub}
                 onClick={() => setSelectedSubCategory(sub)}
