@@ -242,13 +242,13 @@ export const getLocalizedProductData = (result: any, lang: Language): LocalizedP
   let subCategory = '';
   let isExplicitSubCategory = false;
   if (lang === 'he') {
-    subCategory = result.subCategory_he || result.SubCategory_he || result.subCategory_HE || result.SubCategory_HE || result.productSubCategory_he || result.ProductSubCategory_he || result.subcategory_he || result.Subcategory_he || '';
+    subCategory = result.subProductCategory_he || result.SubProductCategory_he || result.subProductCategory_HE || result.subCategory_he || result.SubCategory_he || result.subCategory_HE || result.SubCategory_HE || result.productSubCategory_he || result.ProductSubCategory_he || result.subcategory_he || result.Subcategory_he || '';
   } else if (lang === 'en') {
-    subCategory = result.subCategory_en || result.SubCategory_en || result.subCategory_EN || result.SubCategory_EN || result.productSubCategory_en || result.ProductSubCategory_en || result.subcategory_en || result.Subcategory_en || '';
+    subCategory = result.subProductCategory_en || result.SubProductCategory_en || result.subProductCategory_EN || result.subCategory_en || result.SubCategory_en || result.subCategory_EN || result.SubCategory_EN || result.productSubCategory_en || result.ProductSubCategory_en || result.subcategory_en || result.Subcategory_en || '';
   } else if (lang === 'ru') {
-    subCategory = result.subCategory_ru || result.SubCategory_ru || result.subCategory_RU || result.SubCategory_RU || result.productSubCategory_ru || result.ProductSubCategory_ru || result.subcategory_ru || result.Subcategory_ru || '';
+    subCategory = result.subProductCategory_ru || result.SubProductCategory_ru || result.subProductCategory_RU || result.subCategory_ru || result.SubCategory_ru || result.subCategory_RU || result.SubCategory_RU || result.productSubCategory_ru || result.ProductSubCategory_ru || result.subcategory_ru || result.Subcategory_ru || '';
   } else if (lang === 'ar') {
-    subCategory = result.subCategory_ar || result.SubCategory_ar || result.subCategory_AR || result.SubCategory_AR || result.productSubCategory_ar || result.ProductSubCategory_ar || result.subcategory_ar || result.Subcategory_ar || '';
+    subCategory = result.subProductCategory_ar || result.SubProductCategory_ar || result.subProductCategory_AR || result.subCategory_ar || result.SubCategory_ar || result.subCategory_AR || result.SubCategory_AR || result.productSubCategory_ar || result.ProductSubCategory_ar || result.subcategory_ar || result.Subcategory_ar || '';
   }
 
   if (subCategory && subCategory.trim() !== '') {
@@ -258,7 +258,7 @@ export const getLocalizedProductData = (result: any, lang: Language): LocalizedP
   const fallbackTitle = result.productDisplayTitle || result.productTitle || result.title || result.name || '';
   const fallbackDesc = result.productDescription || result.description || '';
   const fallbackCategory = result.categoryName || result.CategoryName || result.productCategory || result.ProductCategory || result.category || result.Category || '';
-  const fallbackSubCategory = result.subCategory || result.SubCategory || result.productSubCategory || result.ProductSubCategory || result.subcategory || result.Subcategory || '';
+  const fallbackSubCategory = result.subProductCategory || result.SubProductCategory || result.productSubCategory || result.ProductSubCategory || result.subCategory || result.SubCategory || result.subcategory || result.Subcategory || '';
 
   return {
     title: cleanEscapedQuotes(title || fallbackTitle),

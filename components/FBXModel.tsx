@@ -186,6 +186,57 @@ function getAlphaPixels(texture: THREE.Texture) {
   }
 }
 
+
+const embeddedAlphaCache = new WeakMap<THREE.Texture, boolean>();
+
+/**
+ * Detects whether a color texture contains real transparency in its own RGBA
+ * alpha channel. This is needed for PNG decals such as eyes/hair cards where
+ * there is no separate opacity texture.
+ */
+function textureHasEmbeddedAlpha(texture: THREE.Texture): boolean {
+  const cached = embeddedAlphaCache.get(texture);
+  if (cached !== undefined) return cached;
+
+  const image = texture.image as CanvasImageSource & { width?: number; height?: number };
+  const width = Number(image?.width || 0);
+  const height = Number(image?.height || 0);
+  if (!image || !width || !height) {
+    embeddedAlphaCache.set(texture, false);
+    return false;
+  }
+
+  const sampleWidth = Math.min(width, 512);
+  const sampleHeight = Math.min(height, 512);
+  const canvas = document.createElement('canvas');
+  canvas.width = sampleWidth;
+  canvas.height = sampleHeight;
+
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) {
+    embeddedAlphaCache.set(texture, false);
+    return false;
+  }
+
+  try {
+    ctx.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+    const pixels = ctx.getImageData(0, 0, sampleWidth, sampleHeight).data;
+
+    // Sample every fourth pixel. A single non-opaque pixel is sufficient.
+    for (let i = 3; i < pixels.length; i += 16) {
+      if (pixels[i] < 250) {
+        embeddedAlphaCache.set(texture, true);
+        return true;
+      }
+    }
+  } catch (error) {
+    console.warn('[EmbeddedAlphaCheck] Could not inspect color texture alpha.', error);
+  }
+
+  embeddedAlphaCache.set(texture, false);
+  return false;
+}
+
 /**
  * Returns true only when this mesh actually samples a non-white area of the
  * opacity map through its UVs. This keeps meshes whose UVs live entirely in
@@ -727,114 +778,103 @@ function resolveBestSet(
   geometry?: THREE.BufferGeometry
 ): TextureSet | null {
   let best: TextureSet | null = null;
-  let bestScore = 0;
+  let bestScore = Number.NEGATIVE_INFINITY;
 
   const geomUDIM = geometry ? detectUDIMTile(geometry) : null;
 
-  const normalizeWord = (w: string) => {
-    let s = w.toLowerCase().trim();
-    if (s.startsWith('p')) {
-      if (s.startsWith('pgolden')) s = s.slice(1); // golden
-      else if (s.startsWith('pgold')) s = s.slice(1); // gold
-      else if (s.startsWith('psilvers')) s = s.slice(1); // silvers
-      else if (s.startsWith('psilver')) s = s.slice(1); // silver
-      else if (s.startsWith('pwooden')) s = s.slice(1); // wooden
-      else if (s.startsWith('pblue')) s = s.slice(1); // blue
-    }
-    s = s
+  const normalizeToken = (token: string): string => {
+    let value = token
+      .toLowerCase()
+      .trim()
+      .replace(/^\*+|\*+$/g, '')
+      .replace(/\d+$/g, '')
       .replace(/golden/g, 'gold')
       .replace(/silvers/g, 'silver')
       .replace(/wooden/g, 'wood')
       .replace(/handel/g, 'handle')
       .replace(/middel/g, 'middle')
       .replace(/colour/g, 'color');
-    return s;
+
+    if (value === 'eyes') value = 'eye';
+    else if (value === 'heads') value = 'head';
+    else if (value === 'hands') value = 'hand';
+    else if (value === 'feet') value = 'foot';
+    else if (value === 'shoes') value = 'shoe';
+
+    return value;
   };
 
-  const getNormalizedWords = (name: string) => {
-    const rawWords = name
-      .replace(/([a-z])([A-Z])/g, '$1_$2') // Split camelCase
+  const words = (value: string): string[] =>
+    value
+      .replace(/([a-z])([A-Z])/g, '$1_$2')
       .split(/[\s\-_.]+/)
-      .map(w => w.trim().toLowerCase())
-      .filter(w => w !== '' && !/^\d+$/.test(w)); // omit digits
-    return rawWords.map(normalizeWord);
-  };
+      .map(normalizeToken)
+      .filter(Boolean);
+
+  const normalizedCandidate = (value: string): string =>
+    words(value).join('_');
+
+  const candidates = [
+    { value: meshName, kindBonus: 0.5 },
+    { value: matName, kindBonus: 1.0 },
+  ];
 
   for (const set of sets) {
-    if (!set.targets || set.targets.length === 0) {
-      if (bestScore === 0) { best = set; bestScore = 0.1; }
-      continue;
-    }
-
     const setUDIM = getTextureSetUDIM(set);
 
-    // CRITICAL: If UDIM tile mismatches, REJECT this candidate set immediately!
     if (geomUDIM !== null && setUDIM !== null && geomUDIM !== setUDIM) {
       continue;
     }
 
-    for (const candidate of [meshName, matName]) {
-      const c = candidate.toLowerCase().trim();
-      const cNoDigits = c.replace(/\d+/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+    const targets = set.targets?.length ? set.targets : ['*'];
 
-      for (const pattern of set.targets) {
-        const p = pattern.toLowerCase().trim();
+    for (const candidate of candidates) {
+      const candidateNorm = normalizedCandidate(candidate.value);
+      const candidateWords = words(candidate.value);
 
-        // Reject matching dark candidate to light pattern or vice-versa
-        const cHasDark = c.includes('dark');
-        const cHasLight = c.includes('light');
-        const pHasDark = p.includes('dark');
-        const pHasLight = p.includes('light');
-        if ((cHasDark && pHasLight) || (cHasLight && pHasDark)) {
-          continue;
-        }
-
-        const pNoDigits = p.replace(/\d+/g, '').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+      for (const rawPattern of targets) {
+        const wildcard = rawPattern.includes('*');
+        const patternNorm = normalizedCandidate(rawPattern);
+        const patternWords = words(rawPattern);
 
         let score = 0;
-        if (c === p || (cNoDigits && pNoDigits && cNoDigits === pNoDigits)) {
-          score = 4;
-        } else if (!p.includes('*') && (c.includes(p) || p.includes(c) || (cNoDigits && pNoDigits && (cNoDigits.includes(pNoDigits) || pNoDigits.includes(cNoDigits))))) {
-          const matchLen = p.length;
-          const wordBoundaryReward = c.includes(`_${p}`) || c.includes(`${p}_`) ? 0.2 : 0;
-          score = 3 + (matchLen / 100) + wordBoundaryReward;
-        } else if (p.includes('*') && (matchesAny(c, [p]) || (cNoDigits && pNoDigits && matchesAny(cNoDigits, [pNoDigits])))) {
-          score = 2;
-        } else if (p === '*') {
+
+        if (rawPattern === '*') {
           score = 1;
+        } else if (candidateNorm && patternNorm && candidateNorm === patternNorm) {
+          // eyes1 -> eye, head01 -> head
+          score = 100;
+        } else if (
+          !wildcard &&
+          candidateNorm &&
+          patternNorm &&
+          (candidateNorm.includes(patternNorm) || patternNorm.includes(candidateNorm))
+        ) {
+          score = 70 + Math.min(patternNorm.length, 20) / 20;
+        } else if (matchesAny(candidate.value, [rawPattern])) {
+          score = 55;
         }
 
-        // ── Robust Word Overlap Fallback ──────────────────────────────────────
-        const cWords = getNormalizedWords(candidate);
-        const pWords = getNormalizedWords(pattern);
-        
-        if (cWords.length > 0 && pWords.length > 0) {
-          let overlapCount = 0;
-          for (const cw of cWords) {
-            if (pWords.includes(cw)) overlapCount++;
-          }
-          
-          if (overlapCount > 0) {
-            const overlapRatio = overlapCount / Math.max(cWords.length, 1);
-            const patternRatio = overlapCount / Math.max(pWords.length, 1);
-            
-            if (overlapRatio === 1 || patternRatio === 1) {
-              const overlapScore = 3.5 + (overlapCount / 20) + (overlapRatio * 0.1);
-              if (overlapScore > score) {
-                score = overlapScore;
-              }
-            } else if (overlapCount >= 2) {
-              const overlapScore = 3.1 + (overlapCount / 20) + (overlapRatio * 0.1);
-              if (overlapScore > score) {
-                score = overlapScore;
-              }
-            }
+        if (candidateWords.length && patternWords.length) {
+          const overlap = patternWords.filter(word => candidateWords.includes(word));
+          const allPatternWordsMatched = overlap.length === patternWords.length;
+          const allCandidateWordsMatched = overlap.length === candidateWords.length;
+
+          if (allPatternWordsMatched) {
+            score = Math.max(score, 80 + patternWords.length * 5);
+          } else if (allCandidateWordsMatched) {
+            score = Math.max(score, 75 + candidateWords.length * 4);
+          } else if (overlap.length > 0) {
+            score = Math.max(score, 35 + overlap.length * 5);
           }
         }
 
-        // Give a generous matching bonus if UDIM tiles perfectly align
+        // Specific aliases such as eye/head/shoe must beat a broad model target.
+        score += Math.min(patternWords.length, 5) * 2;
+        score += candidate.kindBonus;
+
         if (geomUDIM !== null && setUDIM !== null && geomUDIM === setUDIM) {
-          score += 10.0;
+          score += 1000;
         }
 
         if (score > bestScore) {
@@ -844,7 +884,8 @@ function resolveBestSet(
       }
     }
   }
-  return best;
+
+  return bestScore > 1 ? best : null;
 }
 
 /**
@@ -1874,6 +1915,23 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
         // ── 1. Resolve best TextureSet for this mesh/material ──────────────
         const set = resolveBestSet(mesh.name, mat.name, textureSets, mesh.geometry);
 
+        if (set) {
+          console.log('[AUTO TEXTURE SET SELECTED]', {
+            mesh: mesh.name,
+            material: mat.name,
+            setId: set.id,
+            targets: set.targets,
+            baseColor: set.baseColor,
+            normal: set.normal,
+            metalness: set.metalness,
+            roughness: set.roughness,
+            alpha: set.alpha,
+            emissive: set.emissive,
+            ao: set.ao,
+            height: set.height,
+          });
+        }
+
         // ── 1.5 Validate client settings mappings against mesh geometry UDIM 
         const geomUDIM = mesh.geometry ? detectUDIMTile(mesh.geometry) : null;
         const getValidMappingUrl = (url: string | undefined) => {
@@ -1956,16 +2014,28 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
         mat.depthTest = true;
         mat.premultipliedAlpha = false;
 
-        const isTransparent = !!((usesAlpha && alphaTex) || settings.transparent || (settings.opacity !== undefined && settings.opacity < 1.0));
+        // PNG BaseColor textures may carry their own transparency (RGBA),
+        // e.g. Shadow Eyes BaseColor.png. Three.js ignores that channel unless
+        // the material is marked transparent / alpha-tested.
+        const usesEmbeddedMapAlpha = !!(
+          baseColorTex &&
+          textureHasEmbeddedAlpha(baseColorTex)
+        );
+
+        const isTransparent = !!(
+          (usesAlpha && alphaTex) ||
+          usesEmbeddedMapAlpha ||
+          settings.transparent ||
+          (settings.opacity !== undefined && settings.opacity < 1.0)
+        );
 
         if (isTransparent) {
-          // The mesh uses transparency / opacity map.
-          if (alphaTex && usesAlpha) {
-            mat.alphaMap = alphaTex;
-          }
+          // Separate opacity map, when present. Otherwise material.map's own
+          // embedded PNG alpha channel is used automatically by Three.js.
+          mat.alphaMap = alphaTex && usesAlpha ? alphaTex : null;
           mat.transparent = true;
-          mat.alphaTest = 0.02; // Discard near-zero opacity fragments
-          mat.depthWrite = true; // Enable depth write so front-faces write to depth buffer and block back-faces / distant Z-fighting flickering
+          mat.alphaTest = 0.02; // Remove transparent PNG background cleanly.
+          mat.depthWrite = false; // Prevent transparent eye/decal shells hiding layers behind them.
           mat.polygonOffset = true;
           mat.polygonOffsetFactor = 1;
           mat.polygonOffsetUnits = 1;
@@ -1982,7 +2052,8 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
             hasBaseColor: !!mat.map,
             baseColorUUID: mat.map?.uuid,
             color: mat.color.getHexString(),
-            targets: set?.targets
+            targets: set?.targets,
+            usesEmbeddedMapAlpha
           });
         } else {
           // Even if the material family has an opacity atlas, this mesh's UVs

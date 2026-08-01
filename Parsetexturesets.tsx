@@ -203,6 +203,108 @@ function deriveTarget(filename: string, prefix = ''): string {
   return result;
 }
 
+
+/**
+ * Normalizes a target token for matching against FBX mesh/material names.
+ * Examples: eyes1 -> eyes, heads -> head, Shadow Eyes -> shadow_eyes.
+ */
+function normalizeTargetToken(token: string): string {
+  let value = token
+    .toLowerCase()
+    .trim()
+    .replace(/\d+$/g, '')
+    .replace(/handel/g, 'handle')
+    .replace(/middel/g, 'middle')
+    .replace(/colour/g, 'color');
+
+  // Conservative singularization for common part names.
+  if (value === 'eyes') value = 'eye';
+  else if (value === 'heads') value = 'head';
+  else if (value === 'hands') value = 'hand';
+  else if (value === 'feet') value = 'foot';
+  else if (value === 'shoes') value = 'shoe';
+
+  return value;
+}
+
+function getTargetTokens(target: string): string[] {
+  return target
+    .split(/[_\s.-]+/)
+    .map(normalizeTargetToken)
+    .filter(Boolean);
+}
+
+/**
+ * Builds useful aliases for nested texture names.
+ * "shadow_eyes" produces: shadow_eyes, eyes, eye.
+ * "shadow_head" produces: shadow_head, head.
+ */
+function buildTargetPatterns(target: string, wildcardFallback: boolean): string[] {
+  const tokens = getTargetTokens(target);
+  const aliases = new Set<string>();
+
+  const add = (value: string) => {
+    const clean = value.replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+    if (!clean) return;
+    aliases.add(clean);
+    if (wildcardFallback) aliases.add(`*${clean}*`);
+  };
+
+  add(target.toLowerCase());
+
+  // Every suffix can identify a more specific mesh/material. This is what maps
+  // "Shadow Eyes BaseColor" to material "eyes1", and similarly Head/Shoes/etc.
+  for (let i = 1; i < tokens.length; i++) {
+    add(tokens.slice(i).join('_'));
+  }
+
+  const last = tokens[tokens.length - 1];
+  if (last) {
+    add(last);
+    if (last === 'eye') add('eyes');
+  }
+
+  return [...aliases];
+}
+
+/**
+ * Inherit missing PBR maps from a parent target group.
+ * Example: shadow_eyes has its own BaseColor but inherits Shadow Normal,
+ * Metalness, Roughness and Opacity from the parent "shadow" group.
+ */
+function inheritParentMaps(
+  groups: Map<string, Omit<TextureSet, 'id' | 'targets'>>
+): Map<string, Omit<TextureSet, 'id' | 'targets'>> {
+  const result = new Map<string, Omit<TextureSet, 'id' | 'targets'>>();
+  const entries = [...groups.entries()];
+
+  for (const [target, maps] of entries) {
+    const tokens = getTargetTokens(target);
+    let merged = { ...maps };
+
+    // Prefer the longest existing parent: a_b_c -> a_b -> a.
+    for (let cut = tokens.length - 1; cut >= 1; cut--) {
+      const parentKey = tokens.slice(0, cut).join('_');
+      const parentEntry = entries.find(([key]) =>
+        getTargetTokens(key).join('_') === parentKey
+      );
+
+      if (parentEntry) {
+        const parentMaps = parentEntry[1];
+        merged = {
+          ...parentMaps,
+          ...merged,
+        };
+        break;
+      }
+    }
+
+    result.set(target, merged);
+  }
+
+  return result;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -283,19 +385,21 @@ export function parseTextureSets(
       : filename;
 
     if (group[mapField]) {
-      console.warn(`[parseTextureSets] ⚠️ Duplicate "${mapField}" for target "${target}": keeping "${(group as any)[mapField]}", ignoring "${url}"`);
+      console.warn(`[parseTextureSets] ⚠️ Duplicate "${String(mapField)}" for target "${target}": keeping "${(group as any)[mapField]}", ignoring "${url}"`);
     } else {
       (group as any)[mapField] = url;
     }
   }
 
-  // Convert to TextureSet[]
+  // Let specific groups inherit missing PBR maps from their parent.
+  // The group's own maps always win over inherited maps.
+  const resolvedGroups = inheritParentMaps(groups);
+
+  // Convert to TextureSet[] with suffix aliases.
   const result: TextureSet[] = [];
   let idx = 0;
-  for (const [target, maps] of groups.entries()) {
-    const patterns = wildcardFallback
-      ? [target, `*${target}*`]
-      : [target];
+  for (const [target, maps] of resolvedGroups.entries()) {
+    const patterns = buildTargetPatterns(target, wildcardFallback);
 
     result.push({
       id: `auto_${idx++}_${target}`,
@@ -306,8 +410,10 @@ export function parseTextureSets(
 
   console.log(
     '[parseTextureSets] ✅ Final groups:\n' +
-    [...groups.entries()]
-      .map(([k, v]) => `  "${k}" → [${Object.keys(v).join(', ')}]`)
+    [...resolvedGroups.entries()]
+      .map(([k, v]) =>
+        `  "${k}" → [${Object.keys(v).join(', ')}] targets=${JSON.stringify(buildTargetPatterns(k, wildcardFallback))}`
+      )
       .join('\n')
   );
 

@@ -54,13 +54,13 @@ const getLocalizedCategoryFromItem = (item: any, lang: Language): string => {
 const getLocalizedSubCategoryFromItem = (item: any, lang: Language): string => {
   if (!item) return '';
   let val = '';
-  if (lang === 'he') val = item.subCategory_he || item.SubCategory_he || item.subCategory_HE || item.productSubCategory_he || item.subcategory_he || '';
-  else if (lang === 'en') val = item.subCategory_en || item.SubCategory_en || item.subCategory_EN || item.productSubCategory_en || item.subcategory_en || '';
-  else if (lang === 'ru') val = item.subCategory_ru || item.SubCategory_ru || item.subCategory_RU || item.productSubCategory_ru || item.subcategory_ru || '';
-  else if (lang === 'ar') val = item.subCategory_ar || item.SubCategory_ar || item.subCategory_AR || item.productSubCategory_ar || item.subcategory_ar || '';
+  if (lang === 'he') val = item.subProductCategory_he || item.SubProductCategory_he || item.subProductCategory_HE || item.subCategory_he || item.SubCategory_he || item.subCategory_HE || item.productSubCategory_he || item.subcategory_he || '';
+  else if (lang === 'en') val = item.subProductCategory_en || item.SubProductCategory_en || item.subProductCategory_EN || item.subCategory_en || item.SubCategory_en || item.subCategory_EN || item.productSubCategory_en || item.subcategory_en || '';
+  else if (lang === 'ru') val = item.subProductCategory_ru || item.SubProductCategory_ru || item.subProductCategory_RU || item.subCategory_ru || item.SubCategory_ru || item.subCategory_RU || item.productSubCategory_ru || item.subcategory_ru || '';
+  else if (lang === 'ar') val = item.subProductCategory_ar || item.SubProductCategory_ar || item.subProductCategory_AR || item.subCategory_ar || item.SubCategory_ar || item.subCategory_AR || item.productSubCategory_ar || item.subcategory_ar || '';
 
   if (!val || val.trim() === '') {
-    val = item.subCategory_he || item.SubCategory_he || item.subCategory_en || item.subCategory || item.SubCategory || item.productSubCategory || item.ProductSubCategory || item.subcategory || item.Subcategory || '';
+    val = item.subProductCategory || item.SubProductCategory || item.subCategory_he || item.SubCategory_he || item.subCategory_en || item.subCategory || item.SubCategory || item.productSubCategory || item.ProductSubCategory || item.subcategory || item.Subcategory || '';
   }
   return cleanEscapedQuotes(val);
 };
@@ -93,6 +93,27 @@ const matchApiCategory = (catStr: string, apiCats: any[]) => {
   if (!catStr || !apiCats || apiCats.length === 0) return undefined;
   const low = catStr.trim().toLowerCase();
   return apiCats.find(c => {
+    const id = (c.categoryId || c.id || '').toString().toLowerCase();
+    const nameHe = (c.categoryName_he || c.CategoryName_he || '').toString().toLowerCase();
+    const nameEn = (c.categoryName_en || c.CategoryName_en || '').toString().toLowerCase();
+    const nameAr = (c.categoryName_ar || c.CategoryName_ar || '').toString().toLowerCase();
+    const nameRu = (c.categoryName_ru || c.CategoryName_ru || '').toString().toLowerCase();
+    const nameGen = (c.categoryName || c.CategoryName || c.name || c.title || '').toString().toLowerCase();
+    return (
+      id === low ||
+      (nameHe && nameHe === low) ||
+      (nameEn && nameEn === low) ||
+      (nameAr && nameAr === low) ||
+      (nameRu && nameRu === low) ||
+      (nameGen && nameGen === low)
+    );
+  });
+};
+
+const getApiCategoriesForCategory = (catStr: string, apiCats: any[]): any[] => {
+  if (!catStr || !apiCats || apiCats.length === 0) return [];
+  const low = catStr.trim().toLowerCase();
+  return apiCats.filter(c => {
     const id = (c.categoryId || c.id || '').toString().toLowerCase();
     const nameHe = (c.categoryName_he || c.CategoryName_he || '').toString().toLowerCase();
     const nameEn = (c.categoryName_en || c.CategoryName_en || '').toString().toLowerCase();
@@ -396,7 +417,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 setProductToCategory(prev => ({ ...prev, [normalizedName]: category }));
               }
 
-              const subCategory = result.productSubCategory || result.subCategory || result.subcategory || '';
+              const subCategory = result.subProductCategory || result.subProductCategory_he || result.subProductCategory_en || result.subProductCategory_ar || result.subProductCategory_ru || result.SubProductCategory || result.productSubCategory || result.subCategory || result.subcategory || result.productSubCategory_he || result.subCategory_he || result.productSubCategory_en || result.subCategory_en || '';
               if (subCategory) {
                 setProductToSubCategory(prev => ({ ...prev, [normalizedName]: subCategory }));
               }
@@ -716,21 +737,55 @@ const Sidebar: React.FC<SidebarProps> = ({
   }, [selectedCategory]);
 
   const availableSubCategories = React.useMemo(() => {
+    const subsSet = new Set<string>();
+
     let relevantCats = apiCategories;
     if (selectedCategory !== 'all') {
-      relevantCats = apiCategories.filter(c => {
-        const primary = getCategoryPrimaryTitle(c);
-        const matched = matchApiCategory(selectedCategory, [c]);
-        return (primary && primary.toLowerCase() === selectedCategory.toLowerCase()) || !!matched;
-      });
+      relevantCats = getApiCategoriesForCategory(selectedCategory, apiCategories);
+      if (relevantCats.length === 0) {
+        relevantCats = apiCategories.filter(c => {
+          const primary = getCategoryPrimaryTitle(c);
+          const matched = matchApiCategory(selectedCategory, [c]);
+          return (primary && primary.toLowerCase() === selectedCategory.toLowerCase()) || !!matched;
+        });
+      }
     }
 
-    const subs = relevantCats
-      .map(c => getLocalizedSubCategoryFromItem(c, language) || c.subCategory_he || c.subCategory_en || c.subCategory || c.subcategory)
-      .filter(Boolean);
+    relevantCats.forEach(c => {
+      const sub = getLocalizedSubCategoryFromItem(c, language) || c.subCategory_he || c.subCategory_en || c.subCategory || c.subcategory;
+      if (sub && sub.trim()) {
+        subsSet.add(cleanEscapedQuotes(sub.trim()));
+      }
+    });
 
-    return Array.from(new Set(subs));
-  }, [selectedCategory, apiCategories, language]);
+    let baseFiles: any[] = [];
+    if (selectedCategory === 'all') {
+      baseFiles = visibleFiles;
+    } else {
+      const catKey = Object.keys(categories).find(k => k === selectedCategory || k.toLowerCase() === selectedCategory.toLowerCase());
+      baseFiles = catKey ? (categories[catKey] || []) : [];
+    }
+
+    baseFiles.forEach(file => {
+      const originalDisplayName = file.name.replace(/\.fbx$/i, '');
+      const normalizedName = originalDisplayName.trim().toLowerCase();
+      
+      const rawProd = rawProductsMap[normalizedName];
+      let sub = '';
+      if (rawProd) {
+        const localized = getLocalizedProductData(rawProd, language);
+        sub = localized.subCategory || rawProd.subProductCategory || rawProd.productSubCategory || rawProd.subCategory || rawProd.subcategory || '';
+      }
+      if (!sub) {
+        sub = productToSubCategory[normalizedName] || '';
+      }
+      if (sub && sub.trim()) {
+        subsSet.add(cleanEscapedQuotes(sub.trim()));
+      }
+    });
+
+    return Array.from(subsSet);
+  }, [selectedCategory, apiCategories, language, visibleFiles, categories, rawProductsMap, productToSubCategory]);
 
   React.useEffect(() => {
     const langName = language === 'he' ? 'Hebrew' : language === 'ar' ? 'Arabic' : language === 'ru' ? 'Russian' : 'English';
@@ -872,30 +927,91 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const selectedModel = models.find(m => m.id === selectedId);
 
-  const filteredProducts = React.useMemo(() => {
-    let base: any[] = [];
-    if (selectedCategory === 'all') {
-      base = visibleFiles;
-    } else {
-      const catKey = Object.keys(categories).find(k => k === selectedCategory || k.toLowerCase() === selectedCategory.toLowerCase());
-      base = catKey ? (categories[catKey] || []) : [];
+  const doesFileMatchSubCategory = React.useCallback((file: any, targetSub: string) => {
+    if (!targetSub || targetSub === 'all') return true;
+
+    const targetClean = cleanEscapedQuotes(targetSub).trim().toLowerCase();
+    const targetTrans = (translatedSubCategories[targetSub] || getCachedTranslation(targetSub, language) || '').trim().toLowerCase();
+
+    const originalDisplayName = file.name.replace(/\.fbx$/i, '');
+    const normalizedName = originalDisplayName.trim().toLowerCase();
+
+    const candidates: string[] = [];
+
+    const rawProd = rawProductsMap[normalizedName];
+    if (rawProd) {
+      const loc = getLocalizedProductData(rawProd, language);
+      if (loc.subCategory) candidates.push(loc.subCategory);
+
+      ['subProductCategory', 'SubProductCategory', 'subProductCategory_he', 'subProductCategory_en', 'subProductCategory_ar', 'subProductCategory_ru', 'productSubCategory', 'subCategory', 'subcategory', 'productSubCategory_he', 'subCategory_he', 'productSubCategory_en', 'subCategory_en', 'productSubCategory_ar', 'subCategory_ar', 'productSubCategory_ru', 'subCategory_ru'].forEach(key => {
+        if (rawProd[key]) candidates.push(String(rawProd[key]));
+      });
     }
+
+    if (productToSubCategory[normalizedName]) {
+      candidates.push(productToSubCategory[normalizedName]);
+    }
+
+
+
+    return candidates.some(cand => {
+      if (!cand) return false;
+      const cleanCand = cleanEscapedQuotes(cand).trim();
+      const candLow = cleanCand.toLowerCase();
+      
+      if (candLow === targetClean || (targetTrans && candLow === targetTrans)) return true;
+
+      const translatedCand = translatedSubCategories[cleanCand] || translatedSubCategories[cand];
+      if (translatedCand) {
+        const transLow = translatedCand.trim().toLowerCase();
+        if (transLow === targetClean || (targetTrans && transLow === targetTrans)) return true;
+      }
+
+      const cachedCand = getCachedTranslation(cleanCand, language);
+      if (cachedCand) {
+        const cacheLow = cachedCand.trim().toLowerCase();
+        if (cacheLow === targetClean || (targetTrans && cacheLow === targetTrans)) return true;
+      }
+
+      for (const [origKey, transVal] of Object.entries(translatedSubCategories)) {
+        const oLow = origKey.trim().toLowerCase();
+        const tLow = transVal.trim().toLowerCase();
+        if ((oLow === candLow || tLow === candLow) && (oLow === targetClean || tLow === targetClean || (targetTrans && (oLow === targetTrans || tLow === targetTrans)))) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+  }, [rawProductsMap, language, productToSubCategory, productToCategory, apiCategories, translatedSubCategories]);
+
+  const baseCategoryFiles = React.useMemo(() => {
+    if (selectedCategory === 'all') {
+      return visibleFiles;
+    }
+    const catKey = Object.keys(categories).find(k => k === selectedCategory || k.toLowerCase() === selectedCategory.toLowerCase());
+    return catKey ? (categories[catKey] || []) : [];
+  }, [selectedCategory, visibleFiles, categories]);
+
+  const subCategoryCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    availableSubCategories.forEach(sub => {
+      let count = 0;
+      baseCategoryFiles.forEach(file => {
+        if (doesFileMatchSubCategory(file, sub)) {
+          count++;
+        }
+      });
+      counts[sub] = count;
+    });
+    return counts;
+  }, [availableSubCategories, baseCategoryFiles, doesFileMatchSubCategory]);
+
+  const filteredProducts = React.useMemo(() => {
+    let base = baseCategoryFiles;
     
     if (selectedSubCategory !== 'all') {
-      base = base.filter(file => {
-        const originalDisplayName = file.name.replace(/\.fbx$/i, '');
-        const normalizedName = originalDisplayName.trim().toLowerCase();
-        
-        let subCategory = productToSubCategory[normalizedName] || '';
-        if (!subCategory) {
-          const prodCat = (productToCategory[normalizedName] || 'General').toLowerCase();
-          const matchedCat = matchApiCategory(prodCat, apiCategories);
-          if (matchedCat) {
-            subCategory = getLocalizedSubCategoryFromItem(matchedCat, language) || matchedCat.subCategory_he || matchedCat.subCategory || matchedCat.subcategory || '';
-          }
-        }
-        return subCategory.toLowerCase() === selectedSubCategory.toLowerCase();
-      });
+      base = base.filter(file => doesFileMatchSubCategory(file, selectedSubCategory));
     }
 
     if (searchQuery) {
@@ -918,7 +1034,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       });
     }
     return base;
-  }, [selectedCategory, selectedSubCategory, visibleFiles, categories, searchQuery, translatedModels, apiTitles, productToSubCategory, productToCategory, apiCategories]);
+  }, [baseCategoryFiles, selectedSubCategory, doesFileMatchSubCategory, searchQuery, translatedModels, apiTitles]);
 
   return (
     <div className="w-full h-full flex flex-col p-2.5 sm:p-3 overflow-hidden select-none bg-white dark:bg-zinc-950" dir={isRTL ? 'rtl' : 'ltr'}>
@@ -985,6 +1101,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               }`}
             >
               {t.all}
+              <span className="mx-1 text-[10px] font-mono opacity-60 inline-block" dir="ltr">({baseCategoryFiles.length})</span>
             </button>
             {availableSubCategories.map((sub) => (
               <button
@@ -997,6 +1114,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 }`}
               >
                 {translatedSubCategories[sub] || sub}
+                <span className="mx-1 text-[10px] font-mono opacity-60 inline-block" dir="ltr">({subCategoryCounts[sub] || 0})</span>
               </button>
             ))}
           </div>
