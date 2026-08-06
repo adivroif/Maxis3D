@@ -177,6 +177,72 @@ export const getLocalizedModelPart = (p: ModelPart, lang: Language): { name: str
   return { name: cleanEscapedQuotes(name), description: cleanEscapedQuotes(description) };
 };
 
+const CATEGORY_TRANSLATIONS: Record<string, Record<Language, string>> = {
+  'רכב': { he: 'רכב', en: 'Vehicle', ar: 'عربة', ru: 'Транспортное средство' },
+  'vehicle': { he: 'רכב', en: 'Vehicle', ar: 'عربة', ru: 'Транспортное средство' },
+  'vehicles': { he: 'רכב', en: 'Vehicle', ar: 'عربة', ru: 'Транспортное средство' },
+  'car': { he: 'רכב', en: 'Vehicle', ar: 'عربة', ru: 'Транспортное средство' },
+  'cars': { he: 'רכב', en: 'Vehicle', ar: 'عربة', ru: 'Транспортное средство' },
+  'automotive': { he: 'רכב', en: 'Vehicle', ar: 'عربة', ru: 'Транспортное средство' },
+  'צעצועים': { he: 'צעצועים', en: 'Toys', ar: 'ألعاب', ru: 'Игрушки' },
+  'toys': { he: 'צעצועים', en: 'Toys', ar: 'ألعاب', ru: 'Игрушки' },
+  'toy': { he: 'צעצועים', en: 'Toys', ar: 'ألعاب', ru: 'Игрушки' },
+  'games': { he: 'צעצועים', en: 'Toys', ar: 'ألعاب', ru: 'Игрушки' },
+  'אודיו': { he: 'אודיו', en: 'Audio', ar: 'الصوتيات', ru: 'Аудио' },
+  'audio': { he: 'אודיו', en: 'Audio', ar: 'الصوتيات', ru: 'Аудио' },
+  'sound': { he: 'אודיו', en: 'Audio', ar: 'الصوتيات', ru: 'Аудио' },
+  'שמע': { he: 'אודיו', en: 'Audio', ar: 'الصوتيات', ru: 'Аудио' },
+  'סאונד': { he: 'אודיו', en: 'Audio', ar: 'الصوتيات', ru: 'Аудио' },
+  'חלקי קליפר': { he: 'חלקי קליפר', en: 'Caliper Parts', ar: 'قطع الفرجار', ru: 'Детали суппорта' },
+  'caliper parts': { he: 'חלקי קליפר', en: 'Caliper Parts', ar: 'قطع الفرجار', ru: 'Детали суппорта' },
+  'caliper': { he: 'חלקי קליפר', en: 'Caliper Parts', ar: 'قطع الفرجار', ru: 'Детали суппорта' },
+  'calipers': { he: 'חלקי קליפר', en: 'Caliper Parts', ar: 'قطع الفرجار', ru: 'Детали суппорта' },
+  'חשמל ורשת': { he: 'חשמל ורשת', en: 'Electricity & Network', ar: 'الكهرباء والشبكة', ru: 'Электроэнергия и сеть' },
+  'electricity and network': { he: 'חשמל ורשת', en: 'Electricity & Network', ar: 'الكهرباء والشبكة', ru: 'Электроэнергия и сеть' },
+  'electricity': { he: 'חשמל ורשת', en: 'Electricity & Network', ar: 'الكهرباء والشبكة', ru: 'Электроэнергия и сеть' },
+  'electrical': { he: 'חשמל ורשת', en: 'Electricity & Network', ar: 'الكهرباء والشبكة', ru: 'Электроэнергия и сеть' },
+  'power': { he: 'חשמל ורשת', en: 'Electricity & Network', ar: 'الكهرباء والشبكة', ru: 'Электроэнергия и сеть' },
+  'network': { he: 'חשמל ורשת', en: 'Electricity & Network', ar: 'الكهرباء والشبكة', ru: 'Электроэнергия и сеть' },
+  'ריהוט': { he: 'ריהוט', en: 'Furniture', ar: 'أثاث', ru: 'Мебель' },
+  'furniture': { he: 'ריהוט', en: 'Furniture', ar: 'أثاث', ru: 'Мебель' },
+  'furnishings': { he: 'ריהוט', en: 'Furniture', ar: 'أثاث', ru: 'Мебель' },
+  'לבית ולגינה': { he: 'לבית ולגינה', en: 'Home & Garden', ar: 'المنزل والحديقة', ru: 'Дом и сад' },
+  'בית ולגינה': { he: 'בית ולגינה', en: 'Home & Garden', ar: 'المنزل والحديقة', ru: 'Дом и сад' },
+  'home & garden': { he: 'לבית ולגינה', en: 'Home & Garden', ar: 'المنزل والحديقة', ru: 'Дом и сад' },
+  'home and garden': { he: 'לבית ולגינה', en: 'Home & Garden', ar: 'المنزل والحديقة', ru: 'Дом и сад' },
+  'home': { he: 'לבית ולגינה', en: 'Home & Garden', ar: 'المنزل والحديقة', ru: 'Дом и сад' },
+  'garden': { he: 'לבית ולגינה', en: 'Home & Garden', ar: 'المنزل والحديقة', ru: 'Дом и сад' },
+  'כללי': { he: 'כללי', en: 'General', ar: 'عام', ru: 'Общее' },
+  'general': { he: 'כללי', en: 'General', ar: 'عام', ru: 'Общее' },
+};
+
+const SUBCATEGORY_TRANSLATIONS: Record<string, Record<Language, string>> = {
+  'מחברים': { he: 'מחברים', en: 'Connectors', ar: 'الموصلات', ru: 'Разъемы' },
+  'connectors': { he: 'מחברים', en: 'Connectors', ar: 'الموصلات', ru: 'Разъемы' },
+  'שידות איפור': { he: 'שידות איפור', en: 'Makeup Cabinets', ar: 'خزائن المكياج', ru: 'Туалетные столики' },
+  'makeup cabinets': { he: 'שידות איפור', en: 'Makeup Cabinets', ar: 'خزائن المكياج', ru: 'Туалетные столики' },
+  'חשמל כבלים': { he: 'חשמל כבלים', en: 'Electrical Cables', ar: 'الكابلات الكهربائية', ru: 'Электрические кабели' },
+  'electrical cables': { he: 'חשמל כבלים', en: 'Electrical Cables', ar: 'الكابلات الكهربائية', ru: 'Электрические кабели' },
+};
+
+export const localizeCategoryString = (cat: string, lang: Language): string => {
+  if (!cat) return '';
+  const key = cat.trim().toLowerCase();
+  if (CATEGORY_TRANSLATIONS[key] && CATEGORY_TRANSLATIONS[key][lang]) {
+    return CATEGORY_TRANSLATIONS[key][lang];
+  }
+  return cat;
+};
+
+export const localizeSubCategoryString = (sub: string, lang: Language): string => {
+  if (!sub) return '';
+  const key = sub.trim().toLowerCase();
+  if (SUBCATEGORY_TRANSLATIONS[key] && SUBCATEGORY_TRANSLATIONS[key][lang]) {
+    return SUBCATEGORY_TRANSLATIONS[key][lang];
+  }
+  return sub;
+};
+
 export interface LocalizedProductData {
   title: string;
   description: string;
@@ -244,11 +310,11 @@ export const getLocalizedProductData = (result: any, lang: Language): LocalizedP
   if (lang === 'he') {
     subCategory = result.subProductCategory_he || result.SubProductCategory_he || result.subProductCategory_HE || result.subCategory_he || result.SubCategory_he || result.subCategory_HE || result.SubCategory_HE || result.productSubCategory_he || result.ProductSubCategory_he || result.subcategory_he || result.Subcategory_he || '';
   } else if (lang === 'en') {
-    subCategory = result.subProductCategory_en || result.SubProductCategory_en || result.subProductCategory_EN || result.subCategory_en || result.SubCategory_en || result.subCategory_EN || result.SubCategory_EN || result.productSubCategory_en || result.ProductSubCategory_en || result.subcategory_en || result.Subcategory_en || '';
+    subCategory = result.subProductCategory_en || result.SubProductCategory_en || result.subProductCategory_EN || result.subCategory_en || result.SubCategory_en || result.subCategory_EN || result.subCategory_EN || result.productSubCategory_en || result.ProductSubCategory_en || result.subcategory_en || result.Subcategory_en || '';
   } else if (lang === 'ru') {
-    subCategory = result.subProductCategory_ru || result.SubProductCategory_ru || result.subProductCategory_RU || result.subCategory_ru || result.SubCategory_ru || result.subCategory_RU || result.SubCategory_RU || result.productSubCategory_ru || result.ProductSubCategory_ru || result.subcategory_ru || result.Subcategory_ru || '';
+    subCategory = result.subProductCategory_ru || result.SubProductCategory_ru || result.subProductCategory_RU || result.subCategory_ru || result.SubCategory_ru || result.subCategory_RU || result.subCategory_RU || result.productSubCategory_ru || result.ProductSubCategory_ru || result.subcategory_ru || result.Subcategory_ru || '';
   } else if (lang === 'ar') {
-    subCategory = result.subProductCategory_ar || result.SubProductCategory_ar || result.subProductCategory_AR || result.subCategory_ar || result.SubCategory_ar || result.subCategory_AR || result.SubCategory_AR || result.productSubCategory_ar || result.ProductSubCategory_ar || result.subcategory_ar || result.Subcategory_ar || '';
+    subCategory = result.subProductCategory_ar || result.SubProductCategory_ar || result.subProductCategory_AR || result.subCategory_ar || result.SubCategory_ar || result.subCategory_AR || result.subCategory_AR || result.productSubCategory_ar || result.ProductSubCategory_ar || result.subcategory_ar || result.Subcategory_ar || '';
   }
 
   if (subCategory && subCategory.trim() !== '') {
@@ -257,8 +323,18 @@ export const getLocalizedProductData = (result: any, lang: Language): LocalizedP
 
   const fallbackTitle = result.productDisplayTitle || result.productTitle || result.title || result.name || '';
   const fallbackDesc = result.productDescription || result.description || '';
-  const fallbackCategory = result.categoryName || result.CategoryName || result.productCategory || result.ProductCategory || result.category || result.Category || '';
-  const fallbackSubCategory = result.subProductCategory || result.SubProductCategory || result.productSubCategory || result.ProductSubCategory || result.subCategory || result.SubCategory || result.subcategory || result.Subcategory || '';
+  const rawFallbackCategory = result.categoryName || result.CategoryName || result.productCategory || result.ProductCategory || result.category || result.Category || '';
+  const rawFallbackSubCategory = result.subProductCategory || result.SubProductCategory || result.productSubCategory || result.ProductSubCategory || result.subCategory || result.SubCategory || result.subcategory || result.Subcategory || '';
+
+  const fallbackCategory = localizeCategoryString(rawFallbackCategory, lang);
+  const fallbackSubCategory = localizeSubCategoryString(rawFallbackSubCategory, lang);
+
+  if (!isExplicitCategory && fallbackCategory && fallbackCategory !== rawFallbackCategory) {
+    isExplicitCategory = true;
+  }
+  if (!isExplicitSubCategory && fallbackSubCategory && fallbackSubCategory !== rawFallbackSubCategory) {
+    isExplicitSubCategory = true;
+  }
 
   return {
     title: cleanEscapedQuotes(title || fallbackTitle),
@@ -965,8 +1041,8 @@ const App: React.FC = () => {
     // Synchronously check cache for instant transition
     let initTitle = localized.isExplicitTitle || language === 'en' ? localized.title : (getCachedTranslation(localized.title, langName) || localized.title);
     let initDesc = localized.isExplicitDesc || language === 'en' ? localized.description : (getCachedTranslation(localized.description, langName) || localized.description);
-    let initCat = localized.isExplicitCategory || language === 'en' ? localized.category : (getCachedTranslation(localized.category, langName) || localized.category);
-    let initSubCat = localized.isExplicitSubCategory || language === 'en' ? localized.subCategory : (getCachedTranslation(localized.subCategory, langName) || localized.subCategory);
+    let initCat = localized.isExplicitCategory ? localized.category : (getCachedTranslation(localized.category, langName) || localized.category);
+    let initSubCat = localized.isExplicitSubCategory ? localized.subCategory : (getCachedTranslation(localized.subCategory, langName) || localized.subCategory);
 
     setProductDetails(prev => prev ? { 
       ...prev, 
@@ -992,12 +1068,12 @@ const App: React.FC = () => {
         if (translated) finalDesc = translated;
       }
 
-      if (!localized.isExplicitCategory && finalCat && language !== 'en') {
+      if (!localized.isExplicitCategory && finalCat) {
         const translated = await translateText(finalCat, langName);
         if (translated) finalCat = translated;
       }
 
-      if (!localized.isExplicitSubCategory && finalSubCat && language !== 'en') {
+      if (!localized.isExplicitSubCategory && finalSubCat) {
         const translated = await translateText(finalSubCat, langName);
         if (translated) finalSubCat = translated;
       }
@@ -2835,7 +2911,9 @@ const App: React.FC = () => {
                               ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' 
                               : 'bg-yellow-50 text-yellow-800 border-yellow-200'
                           }`}>
-                            <span className="opacity-70 font-bold">{language === 'he' ? 'קטגוריה:' : 'Category:'}</span>
+                            <span className="opacity-70 font-bold">
+                              {language === 'he' ? 'קטגוריה:' : language === 'ar' ? 'الفئة:' : language === 'ru' ? 'Категория:' : 'Category:'}
+                            </span>
                             <span>{productDetails.category}</span>
                           </div>
                         )}
@@ -2845,7 +2923,9 @@ const App: React.FC = () => {
                               ? 'bg-zinc-800/90 text-zinc-200 border-zinc-700/80' 
                               : 'bg-zinc-100 text-zinc-800 border-zinc-200'
                           }`}>
-                            <span className="opacity-70 font-bold">{language === 'he' ? 'קטגוריה משנית:' : 'Subcategory:'}</span>
+                            <span className="opacity-70 font-bold">
+                              {language === 'he' ? 'קטגוריה משנית:' : language === 'ar' ? 'الفئة الفرعية:' : language === 'ru' ? 'Подкатегория:' : 'Subcategory:'}
+                            </span>
                             <span>{productDetails.subCategory}</span>
                           </div>
                         )}
@@ -2855,7 +2935,9 @@ const App: React.FC = () => {
                               ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
                               : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                           }`}>
-                            <span className="opacity-70 font-bold">{t.price || (language === 'he' ? 'מחיר:' : 'Price:')}</span>
+                            <span className="opacity-70 font-bold">
+                              {t.price || (language === 'he' ? 'מחיר:' : language === 'ar' ? 'السعر:' : language === 'ru' ? 'Цена:' : 'Price:')}
+                            </span>
                             <span>₪{productDetails.price.toLocaleString()}</span>
                           </div>
                         )}

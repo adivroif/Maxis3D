@@ -1140,7 +1140,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       {displayedSubCategories.length > 0 && (
         <div className="flex flex-row items-center gap-2 px-1 sm:px-3 mb-2 h-9 shrink-0 border-t border-black/5 dark:border-white/5 pt-1.5" dir={isRTL ? 'rtl' : 'ltr'}>
           <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 shrink-0">
-            {language === 'he' ? 'קטגוריה משנית:' : 'Subcategory:'}
+            {language === 'he' ? 'קטגוריה משנית:' : language === 'ar' ? 'الفئة الفرعية:' : language === 'ru' ? 'Подкатегория:' : 'Subcategory:'}
           </span>
           <div className="flex-1 flex flex-row gap-1.5 overflow-x-auto overflow-y-hidden scrollbar-none py-0.5 items-center justify-start min-w-0" style={{ scrollbarWidth: 'none' }}>
             <button
@@ -1217,6 +1217,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <div 
                     key={file.key}
                     style={animStyle}
+                    dir={isRTL ? 'rtl' : 'ltr'}
                     onMouseEnter={(e) => {
                       if (isMobile || isTouchDevice) return;
                       const rect = e.currentTarget.getBoundingClientRect();
@@ -1275,9 +1276,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                    <div className="flex flex-col gap-0.5 min-w-0 flex-1 text-start">
                       <div className="flex items-start justify-between gap-1 w-full">
-                        <span className={`text-[11px] font-black uppercase tracking-wider transition-colors leading-tight line-clamp-none break-words whitespace-normal flex-1 ${
+                        <span className={`text-[11px] font-black uppercase tracking-wider transition-colors leading-tight line-clamp-none break-words whitespace-normal flex-1 text-start ${
                           isOutOfStock ? 'text-zinc-400 line-through decoration-red-500/50 decoration-2' : isSelected ? 'text-yellow-600 dark:text-yellow-500' : 'text-zinc-800 dark:text-zinc-200 group-hover:text-yellow-600 dark:group-hover:text-yellow-500'
                         }`}>
                           {displayName}
@@ -1303,7 +1304,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       <div className="flex items-center justify-between gap-1.5 w-full mt-0.5">
                         {description ? (
                           <div 
-                            className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium leading-tight line-clamp-1 flex-1"
+                            className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium leading-tight line-clamp-1 flex-1 text-start"
                             dangerouslySetInnerHTML={{ __html: description }}
                           />
                         ) : (
@@ -1335,7 +1336,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             height: '310px',
           }}
         >
-          <div className="bg-white/98 dark:bg-zinc-900/98 backdrop-blur-3xl rounded-[2rem] border border-black/10 dark:border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.2)] overflow-hidden flex flex-col p-4 justify-between h-full">
+          <div dir={isRTL ? 'rtl' : 'ltr'} className="bg-white/98 dark:bg-zinc-900/98 backdrop-blur-3xl rounded-[2rem] border border-black/10 dark:border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.2)] overflow-hidden flex flex-col p-4 justify-between h-full">
             <div className="h-[120px] w-full bg-zinc-50 rounded-[1.5rem] overflow-hidden border border-black/5 dark:border-white/5 shrink-0 flex items-center justify-center">
               {hoveredProduct.image ? (
                 <img 
@@ -1355,7 +1356,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             
             <div className="flex flex-col justify-between flex-1 mt-2 min-h-0">
               <div className="flex flex-col gap-0.5 shrink-0">
-                <div className={`flex items-center justify-between ${isRTL ? 'flex-row-reverse' : ''}`}>
+                <div className="flex items-center justify-between">
                   <span className="text-xs sm:text-sm font-black uppercase tracking-[0.1em] text-yellow-600 dark:text-yellow-500 leading-none">
                     {t.productInfo}
                   </span>
@@ -1365,24 +1366,24 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </span>
                   )}
                 </div>
-                <h3 className={`text-base font-black text-zinc-900 dark:text-zinc-100 leading-tight uppercase tracking-tight line-clamp-1 ${isRTL ? 'text-end' : ''}`}>
+                <h3 className="text-base font-black text-zinc-900 dark:text-zinc-100 leading-tight uppercase tracking-tight line-clamp-1 text-start">
                   {hoveredProduct.name}
                 </h3>
               </div>
               
               {hoveredProduct.description ? (
                 <div 
-                  className={`text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed overflow-y-auto no-scrollbar max-h-[90px] ${isRTL ? 'text-end' : ''}`}
+                  className="text-xs text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed overflow-y-auto no-scrollbar max-h-[90px] text-start"
                   dangerouslySetInnerHTML={{ __html: hoveredProduct.description }}
                 />
               ) : (
-                <div className={`text-xs text-zinc-400 dark:text-zinc-500 italic font-medium leading-relaxed ${isRTL ? 'text-end' : ''}`}>
+                <div className="text-xs text-zinc-400 dark:text-zinc-500 italic font-medium leading-relaxed text-start">
                   {isRTL ? 'אין תיאור זמין' : 'No description available'}
                 </div>
               )}
 
-              <div className={`flex items-center justify-between pt-2 border-t border-black/5 dark:border-white/5 mt-1 shrink-0 ${isRTL ? 'flex-row-reverse' : ''}`}>
-                <div className={`flex items-center gap-1.5 ${isRTL ? 'flex-row-reverse' : ''}`}>
+              <div className="flex items-center justify-between pt-2 border-t border-black/5 dark:border-white/5 mt-1 shrink-0">
+                <div className="flex items-center gap-1.5">
                   <div className={`w-1.5 h-1.5 rounded-full ${(hoveredProduct.inventory || 0) > 0 ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-500'}`} />
                   <span className="text-[9px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
                     {(hoveredProduct.inventory || 0) > 0 ? t.inStock : t.outOfStock}
