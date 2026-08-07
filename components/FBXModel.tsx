@@ -3,7 +3,7 @@ import { useLoader, useFrame } from '@react-three/fiber';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { TGALoader } from 'three/examples/jsm/loaders/TGALoader.js';
 import { DDSLoader } from 'three/examples/jsm/loaders/DDSLoader.js';
-import { Html } from '@react-three/drei';
+import { Html, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import '../types';
@@ -1120,6 +1120,197 @@ export function generateSingleMeshUVSVG(mesh: THREE.Mesh): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Physical 3D Dimension Lines Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ModelDimensions3D: React.FC<{
+  fbx: THREE.Object3D;
+  scaleFactor: number;
+  productLength?: string | number;
+  productWidth?: string | number;
+  productHeight?: string | number;
+  language?: string;
+}> = ({ fbx, scaleFactor, productLength, productWidth, productHeight, language = 'he' }) => {
+  const lenVal = productLength !== undefined && productLength !== null ? String(productLength).trim() : '';
+  const widthVal = productWidth !== undefined && productWidth !== null ? String(productWidth).trim() : '';
+  const heightVal = productHeight !== undefined && productHeight !== null ? String(productHeight).trim() : '';
+
+  const hasLen = lenVal !== '' && lenVal !== '0';
+  const hasWidth = widthVal !== '' && widthVal !== '0';
+  const hasHeight = heightVal !== '' && heightVal !== '0';
+
+  const bounds = useMemo(() => {
+    if (!fbx || (!hasLen && !hasWidth && !hasHeight)) return null;
+    fbx.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(fbx);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const center = new THREE.Vector3(); box.getCenter(center);
+    return { box, size, center };
+  }, [fbx, hasLen, hasWidth, hasHeight]);
+
+  if (!bounds || (!hasLen && !hasWidth && !hasHeight)) return null;
+
+  const { box, size, center } = bounds;
+
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const gap = maxDim > 0 ? maxDim * 0.05 : 1.5;
+  const tick = maxDim > 0 ? maxDim * 0.025 : 0.8;
+  const distanceFactor = scaleFactor > 0 ? 30 / scaleFactor : 30;
+
+  // 1. LENGTH (אורך): Horizontal line along X axis at front floor
+  const lenY = box.min.y - gap * 0.3;
+  const lenZ = box.max.z + gap;
+
+  // 2. WIDTH (רוחב): Horizontal line along Z axis (depth) on side floor
+  const widthX = box.min.x - gap;
+  const widthY = box.min.y - gap * 0.3;
+
+  // 3. HEIGHT (גובה): Vertical line along Y axis on side corner
+  const heightX = box.min.x - gap;
+  const heightZ = box.max.z + gap;
+
+  const lenLabel = language === 'he' ? 'אורך:' : language === 'ar' ? 'الطول:' : language === 'ru' ? 'Длина:' : 'Length:';
+  const widthLabel = language === 'he' ? 'רוחב:' : language === 'ar' ? 'العرض:' : language === 'ru' ? 'Ширина:' : 'Width:';
+  const heightLabel = language === 'he' ? 'גובה:' : language === 'ar' ? 'الارتفاع:' : language === 'ru' ? 'Высота:' : 'Height:';
+
+  return (
+    <group>
+      {/* 1. HORIZONTAL LENGTH LINE (אורך) - FRONT FLOOR (X AXIS) */}
+      {hasLen && (
+        <group>
+          <Line
+            points={[
+              [box.min.x, lenY, lenZ],
+              [box.max.x, lenY, lenZ]
+            ]}
+            color="#f59e0b"
+            lineWidth={2}
+            transparent
+            opacity={0.9}
+          />
+          <Line
+            points={[
+              [box.min.x, lenY, lenZ - tick],
+              [box.min.x, lenY, lenZ + tick]
+            ]}
+            color="#f59e0b"
+            lineWidth={2}
+            transparent
+            opacity={0.9}
+          />
+          <Line
+            points={[
+              [box.max.x, lenY, lenZ - tick],
+              [box.max.x, lenY, lenZ + tick]
+            ]}
+            color="#f59e0b"
+            lineWidth={2}
+            transparent
+            opacity={0.9}
+          />
+          <group position={[center.x, lenY, lenZ]}>
+            <Html center distanceFactor={distanceFactor} zIndexRange={[100, 0]}>
+              <div className="px-2 py-0.5 rounded-full bg-stone-900/90 text-amber-400 border border-amber-500/50 backdrop-blur-md text-[10px] font-bold font-mono shadow-md flex items-center gap-1 shrink-0 whitespace-nowrap select-none pointer-events-none">
+                <span className="text-[8px] text-amber-200/80 font-sans tracking-wide uppercase">{lenLabel}</span>
+                <span>{lenVal}</span>
+              </div>
+            </Html>
+          </group>
+        </group>
+      )}
+
+      {/* 2. HORIZONTAL WIDTH LINE (רוחב) - SIDE FLOOR (Z AXIS / DEPTH) */}
+      {hasWidth && (
+        <group>
+          <Line
+            points={[
+              [widthX, widthY, box.min.z],
+              [widthX, widthY, box.max.z]
+            ]}
+            color="#0284c7"
+            lineWidth={2}
+            transparent
+            opacity={0.9}
+          />
+          <Line
+            points={[
+              [widthX - tick, widthY, box.min.z],
+              [widthX + tick, widthY, box.min.z]
+            ]}
+            color="#0284c7"
+            lineWidth={2}
+            transparent
+            opacity={0.9}
+          />
+          <Line
+            points={[
+              [widthX - tick, widthY, box.max.z],
+              [widthX + tick, widthY, box.max.z]
+            ]}
+            color="#0284c7"
+            lineWidth={2}
+            transparent
+            opacity={0.9}
+          />
+          <group position={[widthX, widthY, center.z]}>
+            <Html center distanceFactor={distanceFactor} zIndexRange={[100, 0]}>
+              <div className="px-2 py-0.5 rounded-full bg-stone-900/90 text-sky-400 border border-sky-500/50 backdrop-blur-md text-[10px] font-bold font-mono shadow-md flex items-center gap-1 shrink-0 whitespace-nowrap select-none pointer-events-none">
+                <span className="text-[8px] text-sky-200/80 font-sans tracking-wide uppercase">{widthLabel}</span>
+                <span>{widthVal}</span>
+              </div>
+            </Html>
+          </group>
+        </group>
+      )}
+
+      {/* 3. VERTICAL HEIGHT LINE (גובה) - SIDE CORNER (Y AXIS) */}
+      {hasHeight && (
+        <group>
+          <Line
+            points={[
+              [heightX, box.min.y, heightZ],
+              [heightX, box.max.y, heightZ]
+            ]}
+            color="#10b981"
+            lineWidth={2}
+            transparent
+            opacity={0.9}
+          />
+          <Line
+            points={[
+              [heightX - tick, box.min.y, heightZ],
+              [heightX + tick, box.min.y, heightZ]
+            ]}
+            color="#10b981"
+            lineWidth={2}
+            transparent
+            opacity={0.9}
+          />
+          <Line
+            points={[
+              [heightX - tick, box.max.y, heightZ],
+              [heightX + tick, box.max.y, heightZ]
+            ]}
+            color="#10b981"
+            lineWidth={2}
+            transparent
+            opacity={0.9}
+          />
+          <group position={[heightX, center.y, heightZ]}>
+            <Html center distanceFactor={distanceFactor} zIndexRange={[100, 0]}>
+              <div className="px-2 py-0.5 rounded-full bg-stone-900/90 text-emerald-400 border border-emerald-500/50 backdrop-blur-md text-[10px] font-bold font-mono shadow-md flex items-center gap-1 shrink-0 whitespace-nowrap select-none pointer-events-none">
+                <span className="text-[8px] text-emerald-200/80 font-sans tracking-wide uppercase">{heightLabel}</span>
+                <span>{heightVal}</span>
+              </div>
+            </Html>
+          </group>
+        </group>
+      )}
+    </group>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component props
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1143,6 +1334,10 @@ interface FBXModelProps {
   onTexturesProgress?: (loaded: number, total: number) => void;
   onFbxLoaded?: () => void;
   cachedBlobUrls?: Record<string, string>;
+  productLength?: string | number;
+  productWidth?: string | number;
+  productHeight?: string | number;
+  language?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1160,7 +1355,11 @@ const FBXModel: React.FC<FBXModelProps> = ({
   onPartUVLayoutGenerated,
   onTexturesProgress,
   onFbxLoaded,
-  cachedBlobUrls = {}
+  cachedBlobUrls = {},
+  productLength,
+  productWidth,
+  productHeight,
+  language
 }) => {
   const originalFbx = useLoader(FBXLoader, url);
 
@@ -2512,6 +2711,14 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
   return (
     <group ref={outerGroupRef}>
       <primitive key={url} object={fbx} />
+      <ModelDimensions3D
+        fbx={fbx}
+        scaleFactor={scaleFactor}
+        productLength={productLength}
+        productWidth={productWidth}
+        productHeight={productHeight}
+        language={language}
+      />
       {hotspots.map((hs) => (
         <group key={hs.id} position={hs.anchorPosition}>
           <Html distanceFactor={25} center zIndexRange={[100, 0]}>

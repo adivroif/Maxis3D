@@ -462,7 +462,10 @@ const App: React.FC = () => {
     subCategory?: string,
     originalCategory?: string,
     originalSubCategory?: string,
-    price?: number
+    price?: number,
+    length?: string | number,
+    width?: string | number,
+    height?: string | number
   } | null>(null);
   const [productTitles, setProductTitles] = useState<Record<string, string>>(INITIAL_PRODUCT_DISPLAY_TITLES);
   const [productDisplayTitles, setProductDisplayTitles] = useState<Record<string, string>>(INITIAL_PRODUCT_DISPLAY_TITLES);
@@ -978,6 +981,9 @@ const App: React.FC = () => {
                     
                     if (active) {
                       const pPrice = result.productPrice !== undefined ? Number(result.productPrice) : (result.price !== undefined ? Number(result.price) : undefined);
+                      const pLength = result.length ?? result.Length ?? result.productLength ?? result.ProductLength ?? result.product_length ?? undefined;
+                      const pWidth = result.width ?? result.Width ?? result.productWidth ?? result.ProductWidth ?? result.product_width ?? undefined;
+                      const pHeight = result.height ?? result.Height ?? result.productHeight ?? result.ProductHeight ?? result.product_height ?? undefined;
                       setProductDetails({
                         productId: pId,
                         title: apiTitle,
@@ -990,7 +996,10 @@ const App: React.FC = () => {
                         subCategory: localized.subCategory || result.productSubCategory || result.subCategory || result.subcategory || '',
                         originalCategory: result.productCategory || result.category || '',
                         originalSubCategory: result.productSubCategory || result.subCategory || result.subcategory || '',
-                        price: pPrice
+                        price: pPrice,
+                        length: pLength,
+                        width: pWidth,
+                        height: pHeight
                       });
                       
                       // Auto-open on large screens only
@@ -2720,6 +2729,10 @@ const App: React.FC = () => {
                       }));
                     }}
                     cachedBlobUrls={activeModelBlobUrls}
+                    productLength={productDetails?.length ?? productDetails?.rawProductData?.length ?? productDetails?.rawProductData?.Length ?? productDetails?.rawProductData?.productLength ?? productDetails?.rawProductData?.ProductLength ?? productDetails?.rawProductData?.product_length}
+                    productWidth={productDetails?.width ?? productDetails?.rawProductData?.width ?? productDetails?.rawProductData?.Width ?? productDetails?.rawProductData?.productWidth ?? productDetails?.rawProductData?.ProductWidth ?? productDetails?.rawProductData?.product_width}
+                    productHeight={productDetails?.height ?? productDetails?.rawProductData?.height ?? productDetails?.rawProductData?.Height ?? productDetails?.rawProductData?.productHeight ?? productDetails?.rawProductData?.ProductHeight ?? productDetails?.rawProductData?.product_height}
+                    language={language}
                   />
                 </ModelErrorBoundary>
               </group>
