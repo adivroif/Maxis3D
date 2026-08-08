@@ -1256,10 +1256,10 @@ const ModelDimensions3D: React.FC<{
             opacity={0.95}
           />
           <group position={[0, lenY, lenZ + tick * 0.5]}>
-            <Html center distanceFactor={35} zIndexRange={[100, 0]}>
-              <div className="px-3 py-1 rounded-full bg-stone-900/95 text-amber-400 border border-amber-500/70 backdrop-blur-md text-xs font-bold font-mono shadow-xl flex items-center gap-1.5 shrink-0 whitespace-nowrap select-none pointer-events-none">
-                <span className="text-[10px] text-amber-200/90 font-sans tracking-wide uppercase">{lenLabel}</span>
-                <span>{lenVal}</span>
+            <Html center distanceFactor={30} zIndexRange={[100, 0]}>
+              <div className="px-3.5 py-1.5 rounded-full bg-stone-900/95 text-amber-400 border border-amber-500/80 backdrop-blur-md shadow-2xl flex items-center gap-2 shrink-0 whitespace-nowrap select-none pointer-events-none">
+                <span className="text-xs sm:text-sm text-amber-200 font-sans font-black tracking-wide uppercase">{lenLabel}</span>
+                <span className="text-sm sm:text-base font-extrabold font-mono text-amber-400">{lenVal}</span>
               </div>
             </Html>
           </group>
@@ -1300,10 +1300,10 @@ const ModelDimensions3D: React.FC<{
             opacity={0.95}
           />
           <group position={[widthX - tick * 0.5, widthY, 0]}>
-            <Html center distanceFactor={35} zIndexRange={[100, 0]}>
-              <div className="px-3 py-1 rounded-full bg-stone-900/95 text-sky-400 border border-sky-500/70 backdrop-blur-md text-xs font-bold font-mono shadow-xl flex items-center gap-1.5 shrink-0 whitespace-nowrap select-none pointer-events-none">
-                <span className="text-[10px] text-sky-200/90 font-sans tracking-wide uppercase">{widthLabel}</span>
-                <span>{widthVal}</span>
+            <Html center distanceFactor={30} zIndexRange={[100, 0]}>
+              <div className="px-3.5 py-1.5 rounded-full bg-stone-900/95 text-sky-400 border border-sky-500/80 backdrop-blur-md shadow-2xl flex items-center gap-2 shrink-0 whitespace-nowrap select-none pointer-events-none">
+                <span className="text-xs sm:text-sm text-sky-200 font-sans font-black tracking-wide uppercase">{widthLabel}</span>
+                <span className="text-sm sm:text-base font-extrabold font-mono text-sky-400">{widthVal}</span>
               </div>
             </Html>
           </group>
@@ -1344,10 +1344,10 @@ const ModelDimensions3D: React.FC<{
             opacity={0.95}
           />
           <group position={[heightX - tick * 0.5, 0, heightZ]}>
-            <Html center distanceFactor={35} zIndexRange={[100, 0]}>
-              <div className="px-3 py-1 rounded-full bg-stone-900/95 text-emerald-400 border border-emerald-500/70 backdrop-blur-md text-xs font-bold font-mono shadow-xl flex items-center gap-1.5 shrink-0 whitespace-nowrap select-none pointer-events-none">
-                <span className="text-[10px] text-emerald-200/90 font-sans tracking-wide uppercase">{heightLabel}</span>
-                <span>{heightVal}</span>
+            <Html center distanceFactor={30} zIndexRange={[100, 0]}>
+              <div className="px-3.5 py-1.5 rounded-full bg-stone-900/95 text-emerald-400 border border-emerald-500/80 backdrop-blur-md shadow-2xl flex items-center gap-2 shrink-0 whitespace-nowrap select-none pointer-events-none">
+                <span className="text-xs sm:text-sm text-emerald-200 font-sans font-black tracking-wide uppercase">{heightLabel}</span>
+                <span className="text-sm sm:text-base font-extrabold font-mono text-emerald-400">{heightVal}</span>
               </div>
             </Html>
           </group>

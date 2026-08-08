@@ -1099,7 +1099,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <button 
             onClick={fetchR2Files}
             className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg text-zinc-400 hover:text-yellow-500 transition-all ml-1 shrink-0"
-            title={language === 'he' ? 'רענן' : 'Refresh'}
+            title={t.refresh}
           >
             <svg className={`w-3.5 h-3.5 ${isLoadingR2 ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -1111,7 +1111,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex-1 flex flex-row gap-1.5 overflow-x-auto overflow-y-hidden scrollbar-none py-0.5 px-1 items-center justify-start min-w-0" style={{ scrollbarWidth: 'none' }}>
           <button
             onClick={() => setSelectedCategory('all')}
-            className={`px-3.5 py-1.5 text-xs sm:text-sm font-black uppercase tracking-wider rounded-xl transition-all whitespace-nowrap shrink-0 border ${
+            className={`px-3 py-1 text-[11px] sm:text-xs font-black uppercase tracking-wider rounded-xl transition-all whitespace-nowrap shrink-0 border ${
               selectedCategory === 'all'
                 ? 'bg-yellow-500 text-zinc-950 border-yellow-500 shadow-sm font-black'
                 : 'bg-zinc-100 text-zinc-600 hover:text-zinc-800 hover:bg-zinc-200/60 border-transparent dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100 dark:hover:bg-zinc-800'
@@ -1123,14 +1123,14 @@ const Sidebar: React.FC<SidebarProps> = ({
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
-              className={`px-3.5 py-1.5 text-xs sm:text-sm font-black uppercase tracking-wider rounded-xl transition-all whitespace-nowrap shrink-0 border ${
+              className={`px-3 py-1 text-[11px] sm:text-xs font-black uppercase tracking-wider rounded-xl transition-all whitespace-nowrap shrink-0 border ${
                 selectedCategory === cat
                   ? 'bg-yellow-500 text-zinc-950 border-yellow-500 shadow-sm font-black'
                   : 'bg-zinc-100 text-zinc-600 hover:text-zinc-800 hover:bg-zinc-200/60 border-transparent dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100 dark:hover:bg-zinc-800'
               }`}
             >
               {translatedCategories[cat] || cat}
-              <span className="mx-1 text-[10px] font-mono opacity-60 inline-block" dir="ltr">({categories[cat]?.length || 0})</span>
+              <span className="mx-1 text-[9px] font-mono opacity-60 inline-block" dir="ltr">({categories[cat]?.length || 0})</span>
             </button>
           ))}
         </div>
@@ -1139,33 +1139,33 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Subcategories Row */}
       {displayedSubCategories.length > 0 && (
         <div className="flex flex-row items-center gap-2 px-1 sm:px-3 mb-2 h-9 shrink-0 border-t border-black/5 dark:border-white/5 pt-1.5" dir={isRTL ? 'rtl' : 'ltr'}>
-          <span className="text-xs font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 shrink-0">
-            {language === 'he' ? 'קטגוריה משנית:' : language === 'ar' ? 'الفئة الفرعية:' : language === 'ru' ? 'Подкатегория:' : 'Subcategory:'}
+          <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 shrink-0">
+            {t.subcategory}
           </span>
           <div className="flex-1 flex flex-row gap-1.5 overflow-x-auto overflow-y-hidden scrollbar-none py-0.5 items-center justify-start min-w-0" style={{ scrollbarWidth: 'none' }}>
             <button
               onClick={() => setSelectedSubCategory('all')}
-              className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap shrink-0 border ${
+              className={`px-2.5 py-0.5 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap shrink-0 border ${
                 selectedSubCategory === 'all'
                   ? 'bg-yellow-500/20 text-yellow-800 border-yellow-500/30 dark:text-yellow-400 font-extrabold'
                   : 'bg-zinc-100 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/40 border-transparent dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:text-zinc-200'
               }`}
             >
               {t.all}
-              <span className="mx-1 text-[10px] font-mono opacity-60 inline-block" dir="ltr">({baseCategoryFiles.length})</span>
+              <span className="mx-1 text-[9px] font-mono opacity-60 inline-block" dir="ltr">({baseCategoryFiles.length})</span>
             </button>
             {displayedSubCategories.map((sub) => (
               <button
                 key={sub}
                 onClick={() => setSelectedSubCategory(sub)}
-                className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap shrink-0 border ${
+                className={`px-2.5 py-0.5 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all whitespace-nowrap shrink-0 border ${
                   selectedSubCategory === sub
                     ? 'bg-yellow-500/20 text-yellow-800 border-yellow-500/30 dark:text-yellow-400 font-extrabold'
                     : 'bg-zinc-100 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-200/40 border-transparent dark:bg-zinc-900/50 dark:text-zinc-400 dark:hover:text-zinc-200'
                 }`}
               >
                 {translatedSubCategories[sub] || sub}
-                <span className="mx-1 text-[10px] font-mono opacity-60 inline-block" dir="ltr">({subCategoryCounts[sub] || 0})</span>
+                <span className="mx-1 text-[9px] font-mono opacity-60 inline-block" dir="ltr">({subCategoryCounts[sub] || 0})</span>
               </button>
             ))}
           </div>

@@ -5,6 +5,11 @@ export interface Translations {
   all: string;
   categories: string;
   searchAssets: string;
+  searchProduct: string;
+  search: string;
+  clear: string;
+  refresh: string;
+  subcategory: string;
   noAssetsFound: string;
   variant: string;
   default: string;
@@ -55,6 +60,11 @@ export const translations: Record<Language, Translations> = {
     all: "All",
     categories: "Categories",
     searchAssets: "Search assets...",
+    searchProduct: "Search product...",
+    search: "Search",
+    clear: "Clear",
+    refresh: "Refresh",
+    subcategory: "Subcategory:",
     noAssetsFound: "No assets found",
     variant: "Variant",
     default: "Default",
@@ -103,6 +113,11 @@ export const translations: Record<Language, Translations> = {
     all: "הכל",
     categories: "קטגוריות",
     searchAssets: "חיפוש נכסים...",
+    searchProduct: "חפש מוצר...",
+    search: "חיפוש",
+    clear: "נקה",
+    refresh: "רענן",
+    subcategory: "קטגוריה משנית:",
     noAssetsFound: "לא נמצאו נכסים",
     variant: "גרסה",
     default: "ברירת מחדל",
@@ -151,6 +166,11 @@ export const translations: Record<Language, Translations> = {
     all: "الكل",
     categories: "الفئات",
     searchAssets: "البحث عن الأصول...",
+    searchProduct: "البحث عن منتج...",
+    search: "بحث",
+    clear: "مسح",
+    refresh: "تحديث",
+    subcategory: "الفئة الفرعية:",
     noAssetsFound: "لم يتم العثور على أصول",
     variant: "البديل",
     default: "افتراضي",
@@ -199,6 +219,11 @@ export const translations: Record<Language, Translations> = {
     all: "Все",
     categories: "Категории",
     searchAssets: "Поиск ресурсов...",
+    searchProduct: "Поиск товара...",
+    search: "Поиск",
+    clear: "Очистить",
+    refresh: "Обновить",
+    subcategory: "Подкатегория:",
     noAssetsFound: "Ресурсы не найдены",
     variant: "Вариант",
     default: "По умолчанию",

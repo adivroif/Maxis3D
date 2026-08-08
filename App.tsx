@@ -2485,7 +2485,7 @@ const App: React.FC = () => {
                   setIsCatalogCollapsed(false);
                 }
               }}
-              placeholder={language === 'he' ? 'חפש מוצר...' : 'Search product...'}
+              placeholder={t.searchProduct}
               dir={isRTL ? 'rtl' : 'ltr'}
               className="w-full h-10 sm:h-12 pl-4 pr-10 rounded-xl sm:rounded-2xl shadow-xl border border-black/5 bg-white text-zinc-800 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-yellow-500/50 text-xs sm:text-sm font-medium"
             />
@@ -2493,7 +2493,7 @@ const App: React.FC = () => {
               <button
                 onClick={() => setCatalogSearchQuery('')}
                 className="absolute right-3 text-zinc-400 hover:text-zinc-600 transition-colors p-1"
-                title={language === 'he' ? 'נקה' : 'Clear'}
+                title={t.clear}
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
@@ -2510,7 +2510,7 @@ const App: React.FC = () => {
               }
             }}
             className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl shadow-xl border border-black/5 flex items-center justify-center transition-all group ${isSearchOpen ? 'bg-zinc-800 text-white' : 'bg-white text-zinc-400 hover:text-zinc-800'}`}
-            title={language === 'he' ? 'חיפוש' : 'Search'}
+            title={t.search}
           >
             <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -3297,8 +3297,8 @@ const App: React.FC = () => {
           >
             <div className={`flex items-center justify-between shrink-0 ${isIPad ? 'mb-2.5' : 'mb-3 sm:mb-4'}`}>
               <div className="flex flex-col">
-                <span className="text-[8px] font-black uppercase tracking-[0.3em] text-blue-600 leading-none mb-1">{t.partDetails}</span>
-                <h3 className={`font-black text-zinc-800 uppercase tracking-tight break-words whitespace-normal max-w-[180px] sm:max-w-none ${isIPad ? 'text-sm sm:text-base leading-snug' : 'text-base sm:text-lg'}`}>{activePart.name}</h3>
+                <span className="text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-blue-600 leading-none mb-1.5">{t.partDetails}</span>
+                <h3 className={`font-black text-zinc-900 uppercase tracking-tight break-words whitespace-normal max-w-[200px] sm:max-w-none ${isIPad ? 'text-base sm:text-lg leading-snug' : 'text-lg sm:text-xl'}`}>{activePart.name}</h3>
               </div>
               <button 
                 onClick={() => { 
@@ -3317,7 +3317,7 @@ const App: React.FC = () => {
             <div className={`h-[1px] w-full bg-zinc-100 shrink-0 ${isIPad ? 'mb-2.5' : 'mb-3 sm:mb-4'}`}></div>
             <div className="overflow-y-auto pr-2 no-scrollbar flex-1">
               <div 
-                className={`text-zinc-600 leading-relaxed font-medium whitespace-pre-wrap ${isIPad ? 'text-xs sm:text-sm' : 'text-xs sm:text-sm'}`}
+                className={`text-zinc-700 leading-relaxed font-medium whitespace-pre-wrap ${isIPad ? 'text-xs sm:text-sm' : 'text-sm sm:text-base'}`}
                 dangerouslySetInnerHTML={{ __html: activePart.description || t.noDescription }}
               />
             </div>
@@ -3444,7 +3444,7 @@ const App: React.FC = () => {
             
             <div className="flex flex-col gap-2">
               <div className="flex flex-col gap-0.5">
-                <span className={`text-[9px] font-black uppercase tracking-[0.2em] text-blue-600 leading-none mb-1 ${isRTL ? 'text-start animate-pulse' : ''}`}>
+                <span className={`text-xs sm:text-sm font-black uppercase tracking-[0.15em] text-blue-600 leading-none mb-1.5 ${isRTL ? 'text-start animate-pulse' : ''}`}>
                   {t.partDetails || 'PART DETAILS'}
                 </span>
                 <h3 className={`text-lg font-black text-zinc-900 leading-tight uppercase tracking-tight break-words whitespace-normal ${isRTL ? 'text-start' : ''}`}>
