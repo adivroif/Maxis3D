@@ -1119,8 +1119,48 @@ export function generateSingleMeshUVSVG(mesh: THREE.Mesh): string {
   return svg;
 }
 
+// Helper to calculate exact bounding box strictly from visible mesh geometry, ignoring cameras, lights, root nulls, or helpers
+function getMeshBoundingBox(obj: THREE.Object3D): { box: THREE.Box3; size: THREE.Vector3; center: THREE.Vector3 } {
+  obj.updateMatrixWorld(true);
+  const invWorld = obj.matrixWorld.clone().invert();
+  const tempMatrix = new THREE.Matrix4();
+  const box = new THREE.Box3();
+  let meshCount = 0;
+
+  obj.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh && child.visible) {
+      const mesh = child as THREE.Mesh;
+      if (mesh.geometry) {
+        if (!mesh.geometry.boundingBox) {
+          mesh.geometry.computeBoundingBox();
+        }
+        if (mesh.geometry.boundingBox) {
+          const meshBox = mesh.geometry.boundingBox.clone();
+          tempMatrix.multiplyMatrices(invWorld, mesh.matrixWorld);
+          meshBox.applyMatrix4(tempMatrix);
+          if (!isNaN(meshBox.min.x) && !isNaN(meshBox.max.x) && isFinite(meshBox.min.x) && isFinite(meshBox.max.x)) {
+            box.union(meshBox);
+            meshCount++;
+          }
+        }
+      }
+    }
+  });
+
+  if (meshCount === 0 || box.isEmpty()) {
+    box.setFromObject(obj);
+  }
+
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+
+  return { box, size, center };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Physical 3D Dimension Lines Component
+// Physical 3D Dimension Lines Component (Rendered in World Space around Centered Model)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ModelDimensions3D: React.FC<{
@@ -1141,33 +1181,40 @@ const ModelDimensions3D: React.FC<{
 
   const bounds = useMemo(() => {
     if (!fbx || (!hasLen && !hasWidth && !hasHeight)) return null;
-    fbx.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(fbx);
-    const size = new THREE.Vector3(); box.getSize(size);
-    const center = new THREE.Vector3(); box.getCenter(center);
-    return { box, size, center };
+    return getMeshBoundingBox(fbx);
   }, [fbx, hasLen, hasWidth, hasHeight]);
 
   if (!bounds || (!hasLen && !hasWidth && !hasHeight)) return null;
 
-  const { box, size, center } = bounds;
+  const { size } = bounds;
 
-  const maxDim = Math.max(size.x, size.y, size.z);
-  const gap = maxDim > 0 ? maxDim * 0.05 : 1.5;
-  const tick = maxDim > 0 ? maxDim * 0.025 : 0.8;
-  const distanceFactor = scaleFactor > 0 ? 30 / scaleFactor : 30;
+  // Compute exact world space size of the centered & scaled model (~35 units scale)
+  const worldSizeX = size.x * scaleFactor;
+  const worldSizeY = size.y * scaleFactor;
+  const worldSizeZ = size.z * scaleFactor;
+
+  const minX = -worldSizeX / 2;
+  const maxX = worldSizeX / 2;
+  const minY = -worldSizeY / 2;
+  const maxY = worldSizeY / 2;
+  const minZ = -worldSizeZ / 2;
+  const maxZ = worldSizeZ / 2;
+
+  const maxDim = Math.max(worldSizeX, worldSizeY, worldSizeZ);
+  const gap = Math.max(maxDim * 0.05, 1.2);
+  const tick = Math.max(maxDim * 0.025, 0.6);
 
   // 1. LENGTH (אורך): Horizontal line along X axis at front floor
-  const lenY = box.min.y - gap * 0.3;
-  const lenZ = box.max.z + gap;
+  const lenY = minY - gap * 0.2;
+  const lenZ = maxZ + gap;
 
   // 2. WIDTH (רוחב): Horizontal line along Z axis (depth) on side floor
-  const widthX = box.min.x - gap;
-  const widthY = box.min.y - gap * 0.3;
+  const widthX = minX - gap;
+  const widthY = minY - gap * 0.2;
 
   // 3. HEIGHT (גובה): Vertical line along Y axis on side corner
-  const heightX = box.min.x - gap;
-  const heightZ = box.max.z + gap;
+  const heightX = minX - gap;
+  const heightZ = maxZ + gap;
 
   const lenLabel = language === 'he' ? 'אורך:' : language === 'ar' ? 'الطول:' : language === 'ru' ? 'Длина:' : 'Length:';
   const widthLabel = language === 'he' ? 'רוחב:' : language === 'ar' ? 'العرض:' : language === 'ru' ? 'Ширина:' : 'Width:';
@@ -1180,38 +1227,38 @@ const ModelDimensions3D: React.FC<{
         <group>
           <Line
             points={[
-              [box.min.x, lenY, lenZ],
-              [box.max.x, lenY, lenZ]
+              [minX, lenY, lenZ],
+              [maxX, lenY, lenZ]
             ]}
             color="#f59e0b"
-            lineWidth={2}
+            lineWidth={3}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
           <Line
             points={[
-              [box.min.x, lenY, lenZ - tick],
-              [box.min.x, lenY, lenZ + tick]
+              [minX, lenY, lenZ],
+              [minX, lenY, lenZ + tick]
             ]}
             color="#f59e0b"
-            lineWidth={2}
+            lineWidth={3}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
           <Line
             points={[
-              [box.max.x, lenY, lenZ - tick],
-              [box.max.x, lenY, lenZ + tick]
+              [maxX, lenY, lenZ],
+              [maxX, lenY, lenZ + tick]
             ]}
             color="#f59e0b"
-            lineWidth={2}
+            lineWidth={3}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
-          <group position={[center.x, lenY, lenZ]}>
-            <Html center distanceFactor={distanceFactor} zIndexRange={[100, 0]}>
-              <div className="px-2 py-0.5 rounded-full bg-stone-900/90 text-amber-400 border border-amber-500/50 backdrop-blur-md text-[10px] font-bold font-mono shadow-md flex items-center gap-1 shrink-0 whitespace-nowrap select-none pointer-events-none">
-                <span className="text-[8px] text-amber-200/80 font-sans tracking-wide uppercase">{lenLabel}</span>
+          <group position={[0, lenY, lenZ + tick * 0.5]}>
+            <Html center distanceFactor={35} zIndexRange={[100, 0]}>
+              <div className="px-3 py-1 rounded-full bg-stone-900/95 text-amber-400 border border-amber-500/70 backdrop-blur-md text-xs font-bold font-mono shadow-xl flex items-center gap-1.5 shrink-0 whitespace-nowrap select-none pointer-events-none">
+                <span className="text-[10px] text-amber-200/90 font-sans tracking-wide uppercase">{lenLabel}</span>
                 <span>{lenVal}</span>
               </div>
             </Html>
@@ -1224,38 +1271,38 @@ const ModelDimensions3D: React.FC<{
         <group>
           <Line
             points={[
-              [widthX, widthY, box.min.z],
-              [widthX, widthY, box.max.z]
+              [widthX, widthY, minZ],
+              [widthX, widthY, maxZ]
             ]}
             color="#0284c7"
-            lineWidth={2}
+            lineWidth={3}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
           <Line
             points={[
-              [widthX - tick, widthY, box.min.z],
-              [widthX + tick, widthY, box.min.z]
+              [widthX, widthY, minZ],
+              [widthX - tick, widthY, minZ]
             ]}
             color="#0284c7"
-            lineWidth={2}
+            lineWidth={3}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
           <Line
             points={[
-              [widthX - tick, widthY, box.max.z],
-              [widthX + tick, widthY, box.max.z]
+              [widthX, widthY, maxZ],
+              [widthX - tick, widthY, maxZ]
             ]}
             color="#0284c7"
-            lineWidth={2}
+            lineWidth={3}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
-          <group position={[widthX, widthY, center.z]}>
-            <Html center distanceFactor={distanceFactor} zIndexRange={[100, 0]}>
-              <div className="px-2 py-0.5 rounded-full bg-stone-900/90 text-sky-400 border border-sky-500/50 backdrop-blur-md text-[10px] font-bold font-mono shadow-md flex items-center gap-1 shrink-0 whitespace-nowrap select-none pointer-events-none">
-                <span className="text-[8px] text-sky-200/80 font-sans tracking-wide uppercase">{widthLabel}</span>
+          <group position={[widthX - tick * 0.5, widthY, 0]}>
+            <Html center distanceFactor={35} zIndexRange={[100, 0]}>
+              <div className="px-3 py-1 rounded-full bg-stone-900/95 text-sky-400 border border-sky-500/70 backdrop-blur-md text-xs font-bold font-mono shadow-xl flex items-center gap-1.5 shrink-0 whitespace-nowrap select-none pointer-events-none">
+                <span className="text-[10px] text-sky-200/90 font-sans tracking-wide uppercase">{widthLabel}</span>
                 <span>{widthVal}</span>
               </div>
             </Html>
@@ -1268,38 +1315,38 @@ const ModelDimensions3D: React.FC<{
         <group>
           <Line
             points={[
-              [heightX, box.min.y, heightZ],
-              [heightX, box.max.y, heightZ]
+              [heightX, minY, heightZ],
+              [heightX, maxY, heightZ]
             ]}
             color="#10b981"
-            lineWidth={2}
+            lineWidth={3}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
           <Line
             points={[
-              [heightX - tick, box.min.y, heightZ],
-              [heightX + tick, box.min.y, heightZ]
+              [heightX, minY, heightZ],
+              [heightX - tick, minY, heightZ]
             ]}
             color="#10b981"
-            lineWidth={2}
+            lineWidth={3}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
           <Line
             points={[
-              [heightX - tick, box.max.y, heightZ],
-              [heightX + tick, box.max.y, heightZ]
+              [heightX, maxY, heightZ],
+              [heightX - tick, maxY, heightZ]
             ]}
             color="#10b981"
-            lineWidth={2}
+            lineWidth={3}
             transparent
-            opacity={0.9}
+            opacity={0.95}
           />
-          <group position={[heightX, center.y, heightZ]}>
-            <Html center distanceFactor={distanceFactor} zIndexRange={[100, 0]}>
-              <div className="px-2 py-0.5 rounded-full bg-stone-900/90 text-emerald-400 border border-emerald-500/50 backdrop-blur-md text-[10px] font-bold font-mono shadow-md flex items-center gap-1 shrink-0 whitespace-nowrap select-none pointer-events-none">
-                <span className="text-[8px] text-emerald-200/80 font-sans tracking-wide uppercase">{heightLabel}</span>
+          <group position={[heightX - tick * 0.5, 0, heightZ]}>
+            <Html center distanceFactor={35} zIndexRange={[100, 0]}>
+              <div className="px-3 py-1 rounded-full bg-stone-900/95 text-emerald-400 border border-emerald-500/70 backdrop-blur-md text-xs font-bold font-mono shadow-xl flex items-center gap-1.5 shrink-0 whitespace-nowrap select-none pointer-events-none">
+                <span className="text-[10px] text-emerald-200/90 font-sans tracking-wide uppercase">{heightLabel}</span>
                 <span>{heightVal}</span>
               </div>
             </Html>
@@ -2374,9 +2421,7 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
       return { scaleFactor: 1, centeringOffset: [0, 0, 0] as [number, number, number], names: [], meshes: [] };
     }
     fbx.position.set(0,0,0); fbx.rotation.set(0,0,0); fbx.scale.setScalar(1); fbx.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(fbx);
-    const size = new THREE.Vector3(); box.getSize(size);
-    const center = new THREE.Vector3(); box.getCenter(center);
+    const { box, size, center } = getMeshBoundingBox(fbx);
     const targetSize = 35;
     const maxDim = Math.max(size.x, size.y, size.z);
     const factor = maxDim > 0 ? targetSize / maxDim : 1;
@@ -2533,11 +2578,7 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
         }
       }
 
-      // Fallback for active DB parts (presentAtSite === true) when FBX mesh names are generic or mismatched
-      if (!matchedMesh) {
-        matchedMesh = meshes.find(m => !usedMeshSet.has(m)) || meshes[idx % meshes.length];
-      }
-
+      // Do not invent or assign hotspots to random meshes if no actual mesh matches the DB part
       if (matchedMesh) {
         usedMeshSet.add(matchedMesh);
         const tr = translatedParts[p.id];
@@ -2709,8 +2750,38 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
   if (!fbx) return null;
 
   return (
-    <group ref={outerGroupRef}>
-      <primitive key={url} object={fbx} />
+    <>
+      <group ref={outerGroupRef}>
+        <primitive key={url} object={fbx} />
+        {hotspots.map((hs) => (
+          <group key={hs.id} position={hs.anchorPosition}>
+            <Html distanceFactor={25} center zIndexRange={[100, 0]}>
+              <div className="relative group/hotspot pointer-events-auto flex flex-col items-center">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onPartClick) {
+                      onPartClick(activePartId === hs.id ? null : {
+                        id: hs.id, name: hs.partName, description: hs.description,
+                        position: hs.anchorPosition.clone().multiplyScalar(scaleFactor).add(new THREE.Vector3(...centeringOffset)),
+                        size: hs.size.clone().multiplyScalar(scaleFactor), mesh: hs.mesh
+                      });
+                    }
+                  }}
+                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 border-white shadow-2xl transition-all duration-300 transform hover:scale-125 flex items-center justify-center cursor-pointer ${
+                    activePartId === hs.id 
+                      ? 'bg-yellow-500 ring-8 ring-yellow-500/40 scale-110 shadow-yellow-500/50' 
+                      : 'bg-yellow-600 hover:bg-yellow-500 shadow-black/30'
+                  }`}
+                  title={hs.partName}
+                >
+                  <div className="w-2.5 h-2.5 rounded-full bg-white shadow-md animate-pulse" />
+                </button>
+              </div>
+            </Html>
+          </group>
+        ))}
+      </group>
       <ModelDimensions3D
         fbx={fbx}
         scaleFactor={scaleFactor}
@@ -2719,35 +2790,7 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
         productHeight={productHeight}
         language={language}
       />
-      {hotspots.map((hs) => (
-        <group key={hs.id} position={hs.anchorPosition}>
-          <Html distanceFactor={25} center zIndexRange={[100, 0]}>
-            <div className="relative group/hotspot pointer-events-auto flex flex-col items-center">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onPartClick) {
-                    onPartClick(activePartId === hs.id ? null : {
-                      id: hs.id, name: hs.partName, description: hs.description,
-                      position: hs.anchorPosition.clone().multiplyScalar(scaleFactor).add(new THREE.Vector3(...centeringOffset)),
-                      size: hs.size.clone().multiplyScalar(scaleFactor), mesh: hs.mesh
-                    });
-                  }
-                }}
-                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 border-white shadow-2xl transition-all duration-300 transform hover:scale-125 flex items-center justify-center cursor-pointer ${
-                  activePartId === hs.id 
-                    ? 'bg-yellow-500 ring-8 ring-yellow-500/40 scale-110 shadow-yellow-500/50' 
-                    : 'bg-yellow-600 hover:bg-yellow-500 shadow-black/30'
-                }`}
-                title={hs.partName}
-              >
-                <div className="w-2.5 h-2.5 rounded-full bg-white shadow-md animate-pulse" />
-              </button>
-            </div>
-          </Html>
-        </group>
-      ))}
-    </group>
+    </>
   );
 };
 

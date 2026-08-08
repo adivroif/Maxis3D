@@ -491,167 +491,14 @@ async function prewarmAzureWebService() {
 // Start pings in background on server boot
 prewarmAzureWebService().catch(() => {});
 
-// --- CACHE SETUP AND SEEDING FOR MODEL PARTS ---
+// --- CACHE SETUP FOR MODEL PARTS ---
 const cacheFilePath = path.join(process.cwd(), "model_parts_cache.json");
-
-// Define high-quality default parts list for Axe to seed on startup
-const defaultAxeParts = [
-  {
-    id: "axe_head_1",
-    modelName: "Axe",
-    partName: "Golden Axe Head",
-    partKey: "pgolden_axe_head",
-    description: "Rich golden alloy blade crafted for ceremonial and heavy-duty use.",
-    presentAtSite: true
-  },
-  {
-    id: "axe_handle_2",
-    modelName: "Axe",
-    partName: "Wooden Handle",
-    partKey: "pwooden_handel",
-    description: "Durable hand-grafted ash wood grip ensuring optimal feedback and balance.",
-    presentAtSite: true
-  },
-  {
-    id: "axe_pommel_3",
-    modelName: "Axe",
-    partName: "Golden Pommel",
-    partKey: "pgold_axe_pommel",
-    description: "Heavy golden counter-balance pommel situated at the base of the handle.",
-    presentAtSite: true
-  },
-  {
-    id: "axe_rune_spot_4",
-    modelName: "Axe",
-    partName: "Golden Rune Spot",
-    partKey: "pgolden_rune_spot",
-    description: "Magical rune focal point embedded on the upper guard of the weapon.",
-    presentAtSite: true
-  },
-  {
-    id: "axe_rune_5",
-    modelName: "Axe",
-    partName: "Silver Axe Rune",
-    partKey: "psilver_axe_rune",
-    description: "Carved metallic silver runes emitting a low, majestic runic shimmer.",
-    presentAtSite: true
-  },
-  {
-    id: "axe_upper_band_6",
-    modelName: "Axe",
-    partName: "Upper Metallic Band",
-    partKey: "pgold_upper_texture",
-    description: "Heavy protective gold casing stabilizing the upper neck of the shaft.",
-    presentAtSite: true
-  },
-  {
-    id: "axe_lower_grip_7",
-    modelName: "Axe",
-    partName: "Lower Handle Grip",
-    partKey: "lower_texture",
-    description: "Leather-wrapped ergonomic segment at the lower grip of the weapon.",
-    presentAtSite: true
-  }
-];
-
-const defaultPipeParts = [
-  {
-    id: "pipe_middle",
-    modelName: "Pipe",
-    partName: "Pipe Middle Section",
-    partKey: "middle",
-    description: "Main tubular conduit of the pipeline structure.",
-    presentAtSite: true
-  },
-  {
-    id: "pipe_flanges",
-    modelName: "Pipe",
-    partName: "Pipe Top & Bottom Flanges",
-    partKey: "top___bottom",
-    description: "The structural connection rims at both ends of the pipe used for coupling.",
-    presentAtSite: true
-  }
-];
-
-const defaultChestParts = [
-  {
-    id: "chest_body",
-    modelName: "Chest",
-    partName: "Chest Body",
-    partKey: "pCube11",
-    description: "The main storage structure of the container, built for heavy protection.",
-    presentAtSite: true
-  },
-  {
-    id: "chest_lid",
-    modelName: "Chest",
-    partName: "Chest Lid & Cover",
-    partKey: "pCube14",
-    description: "The hinged protective top segment allowing access into the storage void.",
-    presentAtSite: true
-  },
-  {
-    id: "chest_lock",
-    modelName: "Chest",
-    partName: "Reinforced Locking Hasp",
-    partKey: "pCube39",
-    description: "Heavy-duty locking latch system to secure internal contents.",
-    presentAtSite: true
-  }
-];
-
-const defaultElsaParts = [
-  {
-    id: "elsa_pin",
-    modelName: "ELSA 2 Caliper Guide Pin 35X144mm",
-    partName: "Caliper Guide Pin",
-    partKey: "elsa_2_caliper_guide_pin_35_144_mm",
-    description: "Precision-engineered guide pin for automotive caliper slide assembly (35x144mm).",
-    presentAtSite: true
-  },
-  {
-    id: "elsa_boot",
-    modelName: "ELSA 2 Caliper Guide Pin 35X144mm",
-    partName: "Protective Dust Boot",
-    partKey: "boot",
-    description: "Flexible rubber dust seal protecting the sliding pin from contaminants.",
-    presentAtSite: true
-  },
-  {
-    id: "elsa_bolt",
-    modelName: "ELSA 2 Caliper Guide Pin 35X144mm",
-    partName: "Securing Anchor Bolt",
-    partKey: "bolt",
-    description: "Hex-head high-strength fastener anchoring the guide pin into position.",
-    presentAtSite: true
-  }
-];
 
 function initializePartsCache() {
   try {
-    let cacheData: any = {};
-    if (fs.existsSync(cacheFilePath)) {
-      try {
-        cacheData = JSON.parse(fs.readFileSync(cacheFilePath, "utf-8"));
-      } catch (e) {
-        cacheData = {};
-      }
+    if (!fs.existsSync(cacheFilePath)) {
+      fs.writeFileSync(cacheFilePath, JSON.stringify({}, null, 2), "utf-8");
     }
-    const seeds: Record<string, any[]> = {
-      "axe": defaultAxeParts,
-      "pipe": defaultPipeParts,
-      "chest": defaultChestParts,
-      "elsa": defaultElsaParts,
-      "elsa 2 caliper guide pin 35x144mm": defaultElsaParts,
-      "guide pin with bolt for elsa 2 caliper kit": defaultElsaParts,
-    };
-    for (const [k, v] of Object.entries(seeds)) {
-      if (!cacheData[k] || cacheData[k].length === 0) {
-        cacheData[k] = v;
-      }
-    }
-    fs.writeFileSync(cacheFilePath, JSON.stringify(cacheData, null, 2), "utf-8");
-    console.log("✅ Model parts cache initialized with seed fallbacks.");
   } catch (err) {
     console.error("⚠️ Failed to initialize parts cache:", err);
   }
@@ -667,15 +514,16 @@ function getCachedParts(modelName: string) {
       // 1. Exact match (case-insensitive)
       let matchedKey = keys.find(k => k.toLowerCase().trim() === cleanModel);
 
-      // 2. Contains match
+      // 2. Normalized match (ignoring spaces, dashes, underscores)
       if (!matchedKey) {
         matchedKey = keys.find(k => {
-          const kClean = k.toLowerCase().trim();
-          return kClean.includes(cleanModel) || cleanModel.includes(kClean);
+          const kClean = k.toLowerCase().trim().replace(/[\s\-_]/g, '');
+          const targetClean = cleanModel.replace(/[\s\-_]/g, '');
+          return kClean === targetClean;
         });
       }
 
-      if (matchedKey && cacheData[matchedKey] && cacheData[matchedKey].length > 0) {
+      if (matchedKey && Array.isArray(cacheData[matchedKey])) {
         console.log(`[Cache Hit] Loaded ${cacheData[matchedKey].length} parts for '${modelName}' from local model_parts_cache.json (key: '${matchedKey}')`);
         return cacheData[matchedKey];
       }
@@ -695,12 +543,10 @@ function saveCachedParts(modelName: string, parts: any[]) {
       } catch (e) {}
     }
     const cleanKey = modelName.replace(/\.[^/.]+$/, "").toLowerCase().trim();
-    if (parts && parts.length > 0) {
+    if (Array.isArray(parts)) {
       cacheData[cleanKey] = parts;
       fs.writeFileSync(cacheFilePath, JSON.stringify(cacheData, null, 2), "utf-8");
       console.log(`[Cache Sync] Saved ${parts.length} parts for '${modelName}' to local model_parts_cache.json`);
-    } else {
-      console.log(`[Cache Sync] Received empty parts for '${modelName}', keeping existing cache if present.`);
     }
   } catch (err) {
     console.error("Failed to save parts cache:", err);
