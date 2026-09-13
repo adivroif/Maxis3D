@@ -442,8 +442,8 @@ const StudioEnvironment = React.memo(({ url }: { url: string }) => {
     <EnvironmentErrorBoundary
       onCatch={() => {
         if (!activeUrl.includes('polyhaven.org')) {
-          console.warn('[StudioEnvironment] Local HDRI load failed, switching to Poly Haven 2K Brown Studio HDRI fallback.');
-          setActiveUrl('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/brown_photostudio_02_2k.hdr');
+          console.warn('[StudioEnvironment] Local HDRI load failed, switching to Poly Haven 1K Brown Studio HDRI.');
+          setActiveUrl('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/brown_photostudio_02_1k.hdr');
         }
       }}
       fallback={<Environment preset="studio" />}
@@ -1168,7 +1168,7 @@ const App: React.FC = () => {
   }, [language, selectedModel?.name, productDetails?.rawProductData, rawProductsMap, productDisplayTitles]);
 
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
-  const [environmentUrl, setEnvironmentUrl] = useState<string>('/brown_photostudio_02_4k.hdr');
+  const [environmentUrl, setEnvironmentUrl] = useState<string>('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/brown_photostudio_02_1k.hdr');
   const [envPreset] = useState<string>('studio');
   
   const envPresetLabels = useMemo(() => ({
@@ -1418,7 +1418,7 @@ const App: React.FC = () => {
   const defaultCamPos = isMobile ? new THREE.Vector3(0, 40, 180) : new THREE.Vector3(0, 30, 120);
 
   const createDefaultSettings = (): MaterialSettings => ({
-    opacity: 1.0, metalness: 0.5, roughness: 0.5, emissiveIntensity: 1.0,
+    opacity: 1.0, metalness: 0.1, roughness: 0.65, emissiveIntensity: 1.0,
     color: '#ffffff', transparent: false, materialMappings: {},
     normalMappings: {}, metalMappings: {}, roughMappings: {}, alphaMappings: {},
     emissiveMappings: {}, aoMappings: {},
@@ -2669,6 +2669,8 @@ const App: React.FC = () => {
           }} 
           onCreated={({ gl }) => {
             gl.debug.checkShaderErrors = false;
+            gl.toneMapping = THREE.ACESFilmicToneMapping;
+            gl.toneMappingExposure = 1.0;
           }}
           className="relative z-20"
           style={{ background: 'transparent' }}
@@ -2687,11 +2689,11 @@ const App: React.FC = () => {
               </Html>
             )}
 
-            <ambientLight intensity={1.2} />
-            <spotLight position={[50, 50, 50]} angle={0.15} penumbra={1} intensity={2} castShadow />
-            <directionalLight position={[-10, 20, 10]} intensity={1} />
+            <ambientLight intensity={0.35} />
+            <spotLight position={[40, 50, 40]} angle={0.2} penumbra={1} intensity={0.9} castShadow />
+            <directionalLight position={[-15, 20, 15]} intensity={0.6} />
             
-            <StudioEnvironment url={environmentUrl || '/brown_photostudio_02_4k.hdr'} />
+            <StudioEnvironment url={environmentUrl || 'https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/brown_photostudio_02_1k.hdr'} />
 
             {models.map((model) => (
               <group key={model.id} position={model.position} visible={true} onPointerDown={(e) => { e.stopPropagation(); if (selectedId !== model.id) setSelectedId(model.id); }}>
