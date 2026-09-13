@@ -2424,6 +2424,19 @@ async function startServer() {
   // Serve uploaded files statically
   app.use("/uploads", express.static(uploadDir));
 
+  // Serve public directory with proper HDR/binary headers
+  const setCustomHeaders = (res: any, filePath: string) => {
+    if (filePath.endsWith('.hdr') || filePath.endsWith('.exr')) {
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    }
+  };
+
+  app.use(express.static(path.join(process.cwd(), "public"), {
+    setHeaders: setCustomHeaders
+  }));
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -2433,8 +2446,14 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     // Serve static files in production
-    app.use(express.static(path.join(process.cwd(), "dist")));
+    app.use(express.static(path.join(process.cwd(), "dist"), {
+      setHeaders: setCustomHeaders
+    }));
     app.use((req, res) => {
+      // Do not serve index.html for missing asset files (prevents RGBELoader "no header found" error)
+      if (/\.(hdr|exr|fbx|glb|gltf|png|jpg|jpeg|svg|webp|wasm|bin|js|css|map)$/i.test(req.path)) {
+        return res.status(404).send("Asset not found");
+      }
       res.sendFile(path.join(process.cwd(), "dist", "index.html"));
     });
   }

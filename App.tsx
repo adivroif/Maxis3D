@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import './types';
 import FBXModel, { generateSingleMeshUVSVG } from './components/FBXModel';
 import { ModelErrorBoundary } from './components/ModelErrorBoundary';
+import { EnvironmentErrorBoundary } from './components/EnvironmentErrorBoundary';
 import Sidebar from './components/Sidebar';
 import CameraControls from './components/CameraControls';
 import { MaterialSettings, SceneModelInstance, ModelPart, ColorVariant, TextureSet } from './types';
@@ -430,6 +431,27 @@ const INITIAL_PRODUCT_DISPLAY_TITLES: Record<string, string> = {
   'shadow': 'Shadow the Hedgehog'
 };
 
+const StudioEnvironment = React.memo(({ url }: { url: string }) => {
+  const [activeUrl, setActiveUrl] = useState<string>(url);
+
+  useEffect(() => {
+    setActiveUrl(url);
+  }, [url]);
+
+  return (
+    <EnvironmentErrorBoundary
+      onCatch={() => {
+        if (!activeUrl.includes('polyhaven.org')) {
+          console.warn('[StudioEnvironment] Local HDRI load failed, switching to Poly Haven 2K Brown Studio HDRI fallback.');
+          setActiveUrl('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/2k/brown_photostudio_02_2k.hdr');
+        }
+      }}
+      fallback={<Environment preset="studio" />}
+    >
+      <Environment files={activeUrl} />
+    </EnvironmentErrorBoundary>
+  );
+});
 
 const App: React.FC = () => {
   const [models, setModels] = useState<SceneModelInstance[]>([]);
@@ -2669,11 +2691,8 @@ const App: React.FC = () => {
             <spotLight position={[50, 50, 50]} angle={0.15} penumbra={1} intensity={2} castShadow />
             <directionalLight position={[-10, 20, 10]} intensity={1} />
             
-            {environmentUrl ? (
-              <Environment files={environmentUrl} />
-            ) : (
-              <Environment preset={envPreset as any} />
-            )}
+            <StudioEnvironment url={environmentUrl || '/brown_photostudio_02_4k.hdr'} />
+
             {models.map((model) => (
               <group key={model.id} position={model.position} visible={true} onPointerDown={(e) => { e.stopPropagation(); if (selectedId !== model.id) setSelectedId(model.id); }}>
                 <ModelErrorBoundary
