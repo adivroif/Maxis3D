@@ -431,22 +431,35 @@ const INITIAL_PRODUCT_DISPLAY_TITLES: Record<string, string> = {
   'shadow': 'Shadow the Hedgehog'
 };
 
-const StudioEnvironment = React.memo(({ url }: { url: string }) => {
-  const [activeUrl, setActiveUrl] = useState(url);
+const StudioEnvironment = React.memo(({ url, isMobile }: { url?: string; isMobile?: boolean }) => {
+  // Select local HDRI file: On mobile devices, 2K is 6.2MB (vs 25.4MB for 4K), loads rapidly,
+  // avoids mobile WebGL floating-point texture memory limits, and generates an identical PMREM lighting cubemap.
+  // On desktop, 4K is used.
+  const resolvedUrl = useMemo(() => {
+    if (url && url !== '/brown_photostudio_02_4k.hdr') return url;
+    return isMobile ? '/brown_photostudio_02_2k.hdr' : '/brown_photostudio_02_4k.hdr';
+  }, [url, isMobile]);
+
+  const [activeUrl, setActiveUrl] = useState(resolvedUrl);
 
   useEffect(() => {
-    setActiveUrl(url);
-  }, [url]);
+    const nextUrl = (url && url !== '/brown_photostudio_02_4k.hdr')
+      ? url
+      : (isMobile ? '/brown_photostudio_02_2k.hdr' : '/brown_photostudio_02_4k.hdr');
+    setActiveUrl(nextUrl);
+  }, [url, isMobile]);
 
   return (
     <EnvironmentErrorBoundary
-      onCatch={() => {
-        if (!activeUrl.includes('polyhaven.org')) {
-          console.warn('[StudioEnvironment] Local HDRI load failed, switching to Poly Haven 1K Brown Studio HDRI fallback.');
-          setActiveUrl('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/brown_photostudio_02_1k.hdr');
+      onCatch={(err) => {
+        console.warn('[StudioEnvironment] Local HDRI step-down:', err?.message);
+        if (activeUrl.includes('4k')) {
+          setActiveUrl('/brown_photostudio_02_2k.hdr');
+        } else if (activeUrl.includes('2k')) {
+          setActiveUrl('/brown_photostudio_02_1k.hdr');
         }
       }}
-      fallback={<Environment preset="studio" />}
+      fallback={<Environment files="/brown_photostudio_02_1k.hdr" />}
     >
       <Environment files={activeUrl} />
     </EnvironmentErrorBoundary>
@@ -2672,7 +2685,7 @@ const App: React.FC = () => {
           onCreated={({ gl }) => {
             gl.debug.checkShaderErrors = false;
             gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 1.0;
+            gl.toneMappingExposure = 0.85;
             gl.outputColorSpace = THREE.SRGBColorSpace;
           }}
           className="relative z-20"
@@ -2692,11 +2705,10 @@ const App: React.FC = () => {
               </Html>
             )}
 
-            <ambientLight intensity={0.45} />
-            <spotLight position={[50, 50, 50]} angle={0.2} penumbra={1} intensity={1.1} castShadow />
-            <directionalLight position={[-10, 20, 10]} intensity={0.7} />
+            {/* Subtle base ambient fill to keep models visible before HDRI loads */}
+            <ambientLight intensity={0.1} />
             
-            <StudioEnvironment url={environmentUrl || '/brown_photostudio_02_4k.hdr'} />
+            <StudioEnvironment url={environmentUrl} isMobile={isMobile} />
 
             {models.map((model) => (
               <group key={model.id} position={model.position} visible={true} onPointerDown={(e) => { e.stopPropagation(); if (selectedId !== model.id) setSelectedId(model.id); }}>
