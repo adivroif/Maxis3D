@@ -432,34 +432,43 @@ const INITIAL_PRODUCT_DISPLAY_TITLES: Record<string, string> = {
 };
 
 const StudioEnvironment = React.memo(({ url, isMobile }: { url?: string; isMobile?: boolean }) => {
-  // Select local HDRI file: On mobile devices, 2K is 6.2MB (vs 25.4MB for 4K), loads rapidly,
-  // avoids mobile WebGL floating-point texture memory limits, and generates an identical PMREM lighting cubemap.
-  // On desktop, 4K is used.
+  // Use high-speed Cloudflare R2 CDN URLs so the HDRI loads with 100% reliability anywhere the app is hosted
+  // (in production "באוויר", in iframes on WordPress, or on Cloud Run).
+  // On mobile: load 2k (6.2MB) to prevent WebGL texture allocation failures.
+  // On desktop: load 4k (25.4MB).
   const resolvedUrl = useMemo(() => {
-    if (url && url !== '/brown_photostudio_02_4k.hdr') return url;
-    return isMobile ? '/brown_photostudio_02_2k.hdr' : '/brown_photostudio_02_4k.hdr';
+    if (url && url !== '/brown_photostudio_02_4k.hdr' && !url.includes('brown_photostudio_02_4k.hdr')) return url;
+    return isMobile 
+      ? 'https://files.fbxstudio.co.il/brown_photostudio_02_2k.hdr' 
+      : 'https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr';
   }, [url, isMobile]);
 
   const [activeUrl, setActiveUrl] = useState(resolvedUrl);
 
   useEffect(() => {
-    const nextUrl = (url && url !== '/brown_photostudio_02_4k.hdr')
+    const nextUrl = (url && url !== '/brown_photostudio_02_4k.hdr' && !url.includes('brown_photostudio_02_4k.hdr'))
       ? url
-      : (isMobile ? '/brown_photostudio_02_2k.hdr' : '/brown_photostudio_02_4k.hdr');
+      : (isMobile ? 'https://files.fbxstudio.co.il/brown_photostudio_02_2k.hdr' : 'https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr');
     setActiveUrl(nextUrl);
   }, [url, isMobile]);
 
+  const handleCatch = useCallback((err: Error) => {
+    console.warn('[StudioEnvironment] HDRI load error, stepping down fallback:', err?.message);
+    if (activeUrl.includes('4k')) {
+      setActiveUrl('https://files.fbxstudio.co.il/brown_photostudio_02_2k.hdr');
+    } else if (activeUrl.includes('2k')) {
+      setActiveUrl('https://files.fbxstudio.co.il/brown_photostudio_02_1k.hdr');
+    } else if (!activeUrl.startsWith('/')) {
+      setActiveUrl('/brown_photostudio_02_1k.hdr');
+    } else {
+      setActiveUrl('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/brown_photostudio_02_1k.hdr');
+    }
+  }, [activeUrl]);
+
   return (
     <EnvironmentErrorBoundary
-      onCatch={(err) => {
-        console.warn('[StudioEnvironment] Local HDRI step-down:', err?.message);
-        if (activeUrl.includes('4k')) {
-          setActiveUrl('/brown_photostudio_02_2k.hdr');
-        } else if (activeUrl.includes('2k')) {
-          setActiveUrl('/brown_photostudio_02_1k.hdr');
-        }
-      }}
-      fallback={<Environment files="/brown_photostudio_02_1k.hdr" />}
+      onCatch={handleCatch}
+      fallback={<Environment files="https://files.fbxstudio.co.il/brown_photostudio_02_1k.hdr" />}
     >
       <Environment files={activeUrl} />
     </EnvironmentErrorBoundary>
@@ -1181,7 +1190,7 @@ const App: React.FC = () => {
   }, [language, selectedModel?.name, productDetails?.rawProductData, rawProductsMap, productDisplayTitles]);
 
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
-  const [environmentUrl, setEnvironmentUrl] = useState<string>('/brown_photostudio_02_4k.hdr');
+  const [environmentUrl, setEnvironmentUrl] = useState<string>('https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr');
   const [envPreset] = useState<string>('studio');
   
   const envPresetLabels = useMemo(() => ({
