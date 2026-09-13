@@ -432,11 +432,23 @@ const INITIAL_PRODUCT_DISPLAY_TITLES: Record<string, string> = {
 };
 
 const StudioEnvironment = React.memo(({ url }: { url: string }) => {
+  const [activeUrl, setActiveUrl] = useState(url);
+
+  useEffect(() => {
+    setActiveUrl(url);
+  }, [url]);
+
   return (
     <EnvironmentErrorBoundary
+      onCatch={() => {
+        if (!activeUrl.includes('polyhaven.org')) {
+          console.warn('[StudioEnvironment] Local HDRI load failed, switching to Poly Haven 1K Brown Studio HDRI fallback.');
+          setActiveUrl('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/brown_photostudio_02_1k.hdr');
+        }
+      }}
       fallback={<Environment preset="studio" />}
     >
-      <Environment files={url} />
+      <Environment files={activeUrl} />
     </EnvironmentErrorBoundary>
   );
 });
@@ -1403,7 +1415,7 @@ const App: React.FC = () => {
     }
   }, [language, translatedParts, activePart?.id]);
 
-  const defaultCamPos = isMobile ? new THREE.Vector3(0, 40, 180) : new THREE.Vector3(0, 30, 120);
+  const defaultCamPos = isMobile ? new THREE.Vector3(0, 30, 140) : new THREE.Vector3(0, 30, 120);
 
   const createDefaultSettings = (): MaterialSettings => ({
     opacity: 1.0, metalness: 0.5, roughness: 0.5, emissiveIntensity: 1.0,
@@ -2653,16 +2665,21 @@ const App: React.FC = () => {
             antialias: true, 
             alpha: true,
             sortObjects: true,
-            logarithmicDepthBuffer: true
+            logarithmicDepthBuffer: true,
+            precision: 'highp',
+            powerPreference: 'high-performance'
           }} 
           onCreated={({ gl }) => {
             gl.debug.checkShaderErrors = false;
+            gl.toneMapping = THREE.ACESFilmicToneMapping;
+            gl.toneMappingExposure = 1.0;
+            gl.outputColorSpace = THREE.SRGBColorSpace;
           }}
           className="relative z-20"
           style={{ background: 'transparent' }}
           onPointerDown={() => { if (isMoveMode) setIsMoveMode(false); setTargetView(null); }}
         >
-          <PerspectiveCamera makeDefault position={isMobile ? [0, 40, 180] : [0, 30, 120]} fov={35} near={0.5} far={2000} />
+          <PerspectiveCamera makeDefault position={isMobile ? [0, 30, 140] : [0, 30, 120]} fov={35} near={0.5} far={2000} />
           <CameraHandler targetView={targetView} controlsRef={controlsRef} activePartMesh={activePart?.mesh} orbitDirection={orbitDirection} />
 
           <Suspense fallback={<Html center><div className="text-yellow-500 font-black uppercase tracking-[0.5em] animate-pulse text-[10px]">{t.initializing}</div></Html>}>
@@ -2675,9 +2692,9 @@ const App: React.FC = () => {
               </Html>
             )}
 
-            <ambientLight intensity={1.2} />
-            <spotLight position={[50, 50, 50]} angle={0.15} penumbra={1} intensity={2} castShadow />
-            <directionalLight position={[-10, 20, 10]} intensity={1} />
+            <ambientLight intensity={0.45} />
+            <spotLight position={[50, 50, 50]} angle={0.2} penumbra={1} intensity={1.1} castShadow />
+            <directionalLight position={[-10, 20, 10]} intensity={0.7} />
             
             <StudioEnvironment url={environmentUrl || '/brown_photostudio_02_4k.hdr'} />
 
