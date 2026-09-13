@@ -1146,8 +1146,8 @@ const App: React.FC = () => {
   }, [language, selectedModel?.name, productDetails?.rawProductData, rawProductsMap, productDisplayTitles]);
 
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
-  const [environmentUrl, setEnvironmentUrl] = useState<string | null>(null);
-  const [envPreset, setEnvPreset] = useState<string>('sunset');
+  const [environmentUrl, setEnvironmentUrl] = useState<string>('/brown_photostudio_02_4k.hdr');
+  const [envPreset] = useState<string>('studio');
   
   const envPresetLabels = useMemo(() => ({
     en: {
