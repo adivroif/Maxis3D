@@ -2715,7 +2715,9 @@ const App: React.FC = () => {
             )}
 
             {/* Subtle base ambient fill to keep models visible before HDRI loads */}
-            <ambientLight intensity={0.1} />
+            <ambientLight intensity={0.25} />
+            <directionalLight position={[10, 15, 10]} intensity={0.3} />
+            <directionalLight position={[-10, -5, -10]} intensity={0.15} />
             
             <StudioEnvironment url={environmentUrl} isMobile={isMobile} />
 
