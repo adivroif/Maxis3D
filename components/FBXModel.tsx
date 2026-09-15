@@ -2354,11 +2354,8 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
         }
 
         // ── 11. PBR scalars ────────────────────────────────────────────────
-        // When a metalnessMap is present, cap at 0.96 to retain subtle diffuse response so the material
-        // remains clearly visible and well-defined even if HDRI lighting is loading, faint, or subdued.
-        mat.metalness = mat.metalnessMap ? 0.96 : (settings.metalness !== undefined ? settings.metalness : 0.5);
+        mat.metalness = mat.metalnessMap ? 1.0 : (settings.metalness !== undefined ? settings.metalness : 0.5);
         mat.roughness = mat.roughnessMap ? 1.0 : (settings.roughness !== undefined ? settings.roughness : 0.5);
-        mat.envMapIntensity = 1.3;
 
 
         // ── 13. Global tint & hover ────────────────────────────────────────
