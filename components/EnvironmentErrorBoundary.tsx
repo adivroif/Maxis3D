@@ -38,7 +38,7 @@ export class EnvironmentErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      return this.props.fallback || <Environment preset="studio" />;
+      return this.props.fallback || <Environment files="/brown_photostudio_02_4k.hdr" />;
     }
     return this.props.children;
   }
