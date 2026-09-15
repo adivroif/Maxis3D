@@ -432,11 +432,11 @@ const INITIAL_PRODUCT_DISPLAY_TITLES: Record<string, string> = {
 };
 
 const StudioEnvironment = React.memo(({ url }: { url?: string }) => {
-  const activeUrl = url || 'https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr';
+  const activeUrl = url || 'https://files.fbxstudio.co.il/brown_photostudio_02_2k.hdr';
 
   return (
     <EnvironmentErrorBoundary
-      fallback={<Environment files="/brown_photostudio_02_4k.hdr" />}
+      fallback={<Environment files="/brown_photostudio_02_2k.hdr" />}
     >
       <Environment files={activeUrl} />
     </EnvironmentErrorBoundary>
@@ -1158,7 +1158,7 @@ const App: React.FC = () => {
   }, [language, selectedModel?.name, productDetails?.rawProductData, rawProductsMap, productDisplayTitles]);
 
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
-  const [environmentUrl, setEnvironmentUrl] = useState<string>('https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr');
+  const [environmentUrl, setEnvironmentUrl] = useState<string>('https://files.fbxstudio.co.il/brown_photostudio_02_2k.hdr');
   const [envPreset] = useState<string>('studio');
   
   const envPresetLabels = useMemo(() => ({
