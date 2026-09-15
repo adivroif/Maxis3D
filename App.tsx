@@ -431,39 +431,12 @@ const INITIAL_PRODUCT_DISPLAY_TITLES: Record<string, string> = {
   'shadow': 'Shadow the Hedgehog'
 };
 
-const StudioEnvironment = React.memo(({ url, isMobile }: { url?: string; isMobile?: boolean }) => {
-  // Use local static HDRI files (guaranteed CORS-free across all domains, iframes and mobile webviews)
-  // On mobile: 1k HDRI (1.6MB) for instant loading, zero WebGL memory pressure, and instant convolution
-  // On desktop: 2k HDRI (6.2MB) for optimal balance of detail and performance
-  const resolvedUrl = useMemo(() => {
-    if (url && !url.includes('brown_photostudio_02')) return url;
-    return isMobile ? '/brown_photostudio_02_1k.hdr' : '/brown_photostudio_02_2k.hdr';
-  }, [url, isMobile]);
-
-  const [activeUrl, setActiveUrl] = useState(resolvedUrl);
-  const [usePresetFallback, setUsePresetFallback] = useState(false);
-
-  useEffect(() => {
-    const nextUrl = (url && !url.includes('brown_photostudio_02'))
-      ? url
-      : (isMobile ? '/brown_photostudio_02_1k.hdr' : '/brown_photostudio_02_2k.hdr');
-    setActiveUrl(nextUrl);
-    setUsePresetFallback(false);
-  }, [url, isMobile]);
-
-  const handleCatch = useCallback((err: Error) => {
-    console.warn('[StudioEnvironment] HDRI load error, switching to studio preset fallback:', err?.message);
-    setUsePresetFallback(true);
-  }, []);
-
-  if (usePresetFallback) {
-    return <Environment preset="studio" />;
-  }
+const StudioEnvironment = React.memo(({ url }: { url?: string }) => {
+  const activeUrl = url || 'https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr';
 
   return (
     <EnvironmentErrorBoundary
-      onCatch={handleCatch}
-      fallback={<Environment preset="studio" />}
+      fallback={<Environment files="/brown_photostudio_02_4k.hdr" />}
     >
       <Environment files={activeUrl} />
     </EnvironmentErrorBoundary>
@@ -1185,7 +1158,7 @@ const App: React.FC = () => {
   }, [language, selectedModel?.name, productDetails?.rawProductData, rawProductsMap, productDisplayTitles]);
 
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
-  const [environmentUrl, setEnvironmentUrl] = useState<string>('');
+  const [environmentUrl, setEnvironmentUrl] = useState<string>('https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr');
   const [envPreset] = useState<string>('studio');
   
   const envPresetLabels = useMemo(() => ({
@@ -2687,7 +2660,7 @@ const App: React.FC = () => {
           }} 
           onCreated={({ gl }) => {
             gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 0.95;
+            gl.toneMappingExposure = 0.85;
             gl.outputColorSpace = THREE.SRGBColorSpace;
           }}
           className="relative z-20"
@@ -2707,14 +2680,12 @@ const App: React.FC = () => {
               </Html>
             )}
 
-            {/* Reliable 3-point studio lighting so metallic & PBR models are clearly visible under all circumstances */}
-            <ambientLight intensity={1.1} />
-            <directionalLight position={[15, 20, 15]} intensity={1.8} castShadow shadow-mapSize={[1024, 1024]} />
-            <directionalLight position={[-15, -10, -15]} intensity={0.8} />
-            <directionalLight position={[0, 20, -10]} intensity={1.0} />
-            <directionalLight position={[0, -15, 0]} intensity={0.4} />
+            {/* Subtle base ambient fill to keep models visible before HDRI loads */}
+            <ambientLight intensity={0.25} />
+            <directionalLight position={[10, 15, 10]} intensity={0.3} />
+            <directionalLight position={[-10, -5, -10]} intensity={0.15} />
             
-            <StudioEnvironment url={environmentUrl} isMobile={isMobile} />
+            <StudioEnvironment url={environmentUrl} />
 
             {models.map((model) => (
               <group key={model.id} position={model.position} visible={true} onPointerDown={(e) => { e.stopPropagation(); if (selectedId !== model.id) setSelectedId(model.id); }}>
