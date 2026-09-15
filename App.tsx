@@ -432,43 +432,38 @@ const INITIAL_PRODUCT_DISPLAY_TITLES: Record<string, string> = {
 };
 
 const StudioEnvironment = React.memo(({ url, isMobile }: { url?: string; isMobile?: boolean }) => {
-  // Use high-speed Cloudflare R2 CDN URLs so the HDRI loads with 100% reliability anywhere the app is hosted
-  // (in production "באוויר", in iframes on WordPress, or on Cloud Run).
-  // On mobile: load 2k (6.2MB) to prevent WebGL texture allocation failures.
-  // On desktop: load 4k (25.4MB).
+  // Use local static HDRI files (guaranteed CORS-free across all domains, iframes and mobile webviews)
+  // On mobile: 1k HDRI (1.6MB) for instant loading, zero WebGL memory pressure, and instant convolution
+  // On desktop: 2k HDRI (6.2MB) for optimal balance of detail and performance
   const resolvedUrl = useMemo(() => {
-    if (url && url !== '/brown_photostudio_02_4k.hdr' && !url.includes('brown_photostudio_02_4k.hdr')) return url;
-    return isMobile 
-      ? 'https://files.fbxstudio.co.il/brown_photostudio_02_2k.hdr' 
-      : 'https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr';
+    if (url && !url.includes('brown_photostudio_02')) return url;
+    return isMobile ? '/brown_photostudio_02_1k.hdr' : '/brown_photostudio_02_2k.hdr';
   }, [url, isMobile]);
 
   const [activeUrl, setActiveUrl] = useState(resolvedUrl);
+  const [usePresetFallback, setUsePresetFallback] = useState(false);
 
   useEffect(() => {
-    const nextUrl = (url && url !== '/brown_photostudio_02_4k.hdr' && !url.includes('brown_photostudio_02_4k.hdr'))
+    const nextUrl = (url && !url.includes('brown_photostudio_02'))
       ? url
-      : (isMobile ? 'https://files.fbxstudio.co.il/brown_photostudio_02_2k.hdr' : 'https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr');
+      : (isMobile ? '/brown_photostudio_02_1k.hdr' : '/brown_photostudio_02_2k.hdr');
     setActiveUrl(nextUrl);
+    setUsePresetFallback(false);
   }, [url, isMobile]);
 
   const handleCatch = useCallback((err: Error) => {
-    console.warn('[StudioEnvironment] HDRI load error, stepping down fallback:', err?.message);
-    if (activeUrl.includes('4k')) {
-      setActiveUrl('https://files.fbxstudio.co.il/brown_photostudio_02_2k.hdr');
-    } else if (activeUrl.includes('2k')) {
-      setActiveUrl('https://files.fbxstudio.co.il/brown_photostudio_02_1k.hdr');
-    } else if (!activeUrl.startsWith('/')) {
-      setActiveUrl('/brown_photostudio_02_1k.hdr');
-    } else {
-      setActiveUrl('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/brown_photostudio_02_1k.hdr');
-    }
-  }, [activeUrl]);
+    console.warn('[StudioEnvironment] HDRI load error, switching to studio preset fallback:', err?.message);
+    setUsePresetFallback(true);
+  }, []);
+
+  if (usePresetFallback) {
+    return <Environment preset="studio" />;
+  }
 
   return (
     <EnvironmentErrorBoundary
       onCatch={handleCatch}
-      fallback={<Environment files="https://files.fbxstudio.co.il/brown_photostudio_02_1k.hdr" />}
+      fallback={<Environment preset="studio" />}
     >
       <Environment files={activeUrl} />
     </EnvironmentErrorBoundary>
@@ -1190,7 +1185,7 @@ const App: React.FC = () => {
   }, [language, selectedModel?.name, productDetails?.rawProductData, rawProductsMap, productDisplayTitles]);
 
   const [targetView, setTargetView] = useState<{ pos: THREE.Vector3, lookAt: THREE.Vector3 } | null>(null);
-  const [environmentUrl, setEnvironmentUrl] = useState<string>('https://files.fbxstudio.co.il/brown_photostudio_02_4k.hdr');
+  const [environmentUrl, setEnvironmentUrl] = useState<string>('');
   const [envPreset] = useState<string>('studio');
   
   const envPresetLabels = useMemo(() => ({
@@ -2687,14 +2682,12 @@ const App: React.FC = () => {
             antialias: true, 
             alpha: true,
             sortObjects: true,
-            logarithmicDepthBuffer: true,
             precision: 'highp',
             powerPreference: 'high-performance'
           }} 
           onCreated={({ gl }) => {
-            gl.debug.checkShaderErrors = false;
             gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 0.85;
+            gl.toneMappingExposure = 0.95;
             gl.outputColorSpace = THREE.SRGBColorSpace;
           }}
           className="relative z-20"
@@ -2714,10 +2707,12 @@ const App: React.FC = () => {
               </Html>
             )}
 
-            {/* Subtle base ambient fill to keep models visible before HDRI loads */}
-            <ambientLight intensity={0.25} />
-            <directionalLight position={[10, 15, 10]} intensity={0.3} />
-            <directionalLight position={[-10, -5, -10]} intensity={0.15} />
+            {/* Reliable 3-point studio lighting so metallic & PBR models are clearly visible under all circumstances */}
+            <ambientLight intensity={1.1} />
+            <directionalLight position={[15, 20, 15]} intensity={1.8} castShadow shadow-mapSize={[1024, 1024]} />
+            <directionalLight position={[-15, -10, -15]} intensity={0.8} />
+            <directionalLight position={[0, 20, -10]} intensity={1.0} />
+            <directionalLight position={[0, -15, 0]} intensity={0.4} />
             
             <StudioEnvironment url={environmentUrl} isMobile={isMobile} />
 
