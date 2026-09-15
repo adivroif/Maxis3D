@@ -885,7 +885,10 @@ function resolveBestSet(
     }
   }
 
-  return bestScore > 1 ? best : null;
+  if (bestScore > 1) return best;
+  // If there is only a single texture set detected for the model, all parts should use it as default
+  if (sets.length === 1) return sets[0];
+  return null;
 }
 
 /**
@@ -1756,8 +1759,6 @@ const fbx = useMemo(() => {
           // Optimized standard image loader with smart Canvas downscaling and fast self-healing direct-R2/proxy-fallback logic
           const img = new Image();
           img.crossOrigin = 'anonymous';
-          img.referrerPolicy = 'no-referrer';
-          img.decoding = 'async'; // Request async out-of-thread decoding so the browser main thread remains butter smooth
           
           let triedDirect = (loadUrl !== u);
           img.src = loadUrl;
@@ -2353,8 +2354,11 @@ const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
         }
 
         // ── 11. PBR scalars ────────────────────────────────────────────────
-        mat.metalness = mat.metalnessMap ? 1.0 : settings.metalness;
-        mat.roughness = mat.roughnessMap ? 1.0 : settings.roughness;
+        // When a metalnessMap is present, cap at 0.96 to retain subtle diffuse response so the material
+        // remains clearly visible and well-defined even if HDRI lighting is loading, faint, or subdued.
+        mat.metalness = mat.metalnessMap ? 0.96 : (settings.metalness !== undefined ? settings.metalness : 0.5);
+        mat.roughness = mat.roughnessMap ? 1.0 : (settings.roughness !== undefined ? settings.roughness : 0.5);
+        mat.envMapIntensity = 1.3;
 
 
         // ── 13. Global tint & hover ────────────────────────────────────────
